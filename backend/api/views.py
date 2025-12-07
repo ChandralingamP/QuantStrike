@@ -11,6 +11,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
@@ -187,6 +188,7 @@ class ProfitLossMixin:
         return queryset
 
 
+@csrf_exempt
 class ProfitLossView(ProfitLossMixin, ListAPIView):
     authentication_classes = []
     permission_classes = []
@@ -237,6 +239,7 @@ class ProfitLossView(ProfitLossMixin, ListAPIView):
         )
 
 
+@csrf_exempt
 class ProfitLossExportView(ProfitLossMixin, APIView):
     authentication_classes = []
     permission_classes = []
@@ -346,6 +349,7 @@ class ProfitLossExportView(ProfitLossMixin, APIView):
         return response
 
 
+@csrf_exempt
 class StrategyAlphaRunView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -377,6 +381,7 @@ class StrategyAlphaRunView(APIView):
         return Response(summary)
 
 
+@csrf_exempt
 class RequestOTPView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -425,6 +430,7 @@ class RequestOTPView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
+@csrf_exempt
 class PasswordResetRequestView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -469,6 +475,7 @@ class PasswordResetRequestView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
+@csrf_exempt
 class PasswordResetVerifyView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -485,6 +492,7 @@ class PasswordResetVerifyView(APIView):
         )
 
 
+@csrf_exempt
 class PasswordResetView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -501,6 +509,7 @@ class PasswordResetView(APIView):
         )
 
 
+@csrf_exempt
 class SignupView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -519,6 +528,7 @@ class SignupView(APIView):
         )
 
 
+@csrf_exempt
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -538,6 +548,7 @@ class LoginView(APIView):
         )
 
 
+@csrf_exempt
 class AlgoConfigurationView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -600,6 +611,7 @@ class AlgoConfigurationView(APIView):
         return Response(serializer.data)
 
 
+@csrf_exempt
 class HomeStatusView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -714,6 +726,7 @@ class HomeStatusView(APIView):
         return Response(details)
 
 
+@csrf_exempt
 class HomeConnectView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -815,6 +828,7 @@ class HomeConnectView(APIView):
         )
 
 
+@csrf_exempt
 class AdminUserManagementView(APIView):
     authentication_classes = []
     permission_classes = []

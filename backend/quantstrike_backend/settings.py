@@ -19,8 +19,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-default-secret-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
-
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "13.203.224.240",
+    "ec2-13-203-224-240.ap-south-1.compute.amazonaws.com"
+]
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -112,7 +116,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://13.203.224.240",
-    "http://ec2-13-203-224-240.ap-south-1.compute.amazonaws.com"
+    "http://ec2-13-203-224-240.ap-south-1.compute.amazonaws.com",
     *_additional_cors_origins,
 ]
 
