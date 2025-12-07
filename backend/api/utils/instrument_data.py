@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from datetime import date, datetime
 from pathlib import Path
@@ -8,27 +7,17 @@ from typing import Dict, Iterable, List, Optional
 
 from django.conf import settings
 
-DATA_MODULE_PATH = settings.BASE_DIR.parent / "My API" / "Data.py"
-INSTRUMENTS_JSON_PATH = settings.BASE_DIR.parent / "My API" / "instruments.json"
-INSTRUMENT_EXPIRIES_PATH = settings.BASE_DIR.parent / "My API" / "instruments_expiries.json"
+from .scrip_master import download_scrip_master
 
-
-def load_data_module():
-    if not DATA_MODULE_PATH.exists():
-        raise FileNotFoundError(f"Angel data helper not found at {DATA_MODULE_PATH}")
-    spec = importlib.util.spec_from_file_location("quantstrike_instrument_data", DATA_MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+INSTRUMENTS_JSON_PATH = settings.BASE_DIR / "data" / "instruments.json"
+INSTRUMENT_EXPIRIES_PATH = settings.BASE_DIR / "data" / "instruments_expiries.json"
 
 
 def refresh_external_instrument_files() -> Dict[str, List[str]]:
-    module = load_data_module()
-    # download_scrip_master also writes the expiry summary.
-    module.download_scrip_master()
-    # collect_expiries returns the summary dictionary.
-    return module.collect_expiries()
+    """Download latest instrument data and refresh expiry mappings."""
+    ensure_parent_directories()
+    download_scrip_master(INSTRUMENTS_JSON_PATH, INSTRUMENT_EXPIRIES_PATH)
+    return load_expiry_map()
 
 
 def load_expiry_map() -> Dict[str, List[str]]:
@@ -73,6 +62,7 @@ def next_valid_expiry(expiry_codes: Iterable[str], reference: date) -> Optional[
 
 
 def ensure_parent_directories() -> None:
+    """Ensure data directory and placeholder JSON files exist."""
     INSTRUMENTS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not INSTRUMENTS_JSON_PATH.exists():
         INSTRUMENTS_JSON_PATH.write_text("[]", encoding="utf-8")
