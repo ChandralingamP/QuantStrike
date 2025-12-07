@@ -1,0 +1,10 @@
+# Ignore everything by default
+/*
+
+# Allow essential project directories
+!/backend/
+!/frontend/
+!/PRD/
+
+# Keep this gitignore file tracked
+!.gitignore
