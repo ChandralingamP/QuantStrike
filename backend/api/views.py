@@ -194,6 +194,10 @@ class ProfitLossView(ProfitLossMixin, ListAPIView):
     permission_classes = []
     serializer_class = TradeSerializer
     pagination_class = ProfitLossPagination
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def get_queryset(self):
         user = self._resolve_user(self.request)
@@ -243,6 +247,10 @@ class ProfitLossView(ProfitLossMixin, ListAPIView):
 class ProfitLossExportView(ProfitLossMixin, APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def get(self, request, *args, **kwargs):
         user = self._resolve_user(request)
@@ -353,6 +361,10 @@ class ProfitLossExportView(ProfitLossMixin, APIView):
 class StrategyAlphaRunView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         username = request.data.get("username") or request.query_params.get("username")
@@ -381,10 +393,13 @@ class StrategyAlphaRunView(APIView):
         return Response(summary)
 
 
-@csrf_exempt
 class RequestOTPView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = OTPRequestSerializer(data=request.data)
@@ -430,10 +445,13 @@ class RequestOTPView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
-@csrf_exempt
 class PasswordResetRequestView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -475,10 +493,13 @@ class PasswordResetRequestView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
-@csrf_exempt
 class PasswordResetVerifyView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = PasswordResetVerifySerializer(data=request.data)
@@ -492,10 +513,13 @@ class PasswordResetVerifyView(APIView):
         )
 
 
-@csrf_exempt
 class PasswordResetView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = PasswordResetSerializer(data=request.data)
@@ -509,10 +533,13 @@ class PasswordResetView(APIView):
         )
 
 
-@csrf_exempt
 class SignupView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = SignupSerializer(data=request.data)
@@ -528,10 +555,13 @@ class SignupView(APIView):
         )
 
 
-@csrf_exempt
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
@@ -548,10 +578,13 @@ class LoginView(APIView):
         )
 
 
-@csrf_exempt
 class AlgoConfigurationView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def _resolve_user(self, request) -> User:
         username = (
@@ -611,10 +644,13 @@ class AlgoConfigurationView(APIView):
         return Response(serializer.data)
 
 
-@csrf_exempt
 class HomeStatusView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     @staticmethod
     def _validate_session(profile: UserProfile) -> tuple[bool, str | None]:
@@ -726,10 +762,13 @@ class HomeStatusView(APIView):
         return Response(details)
 
 
-@csrf_exempt
 class HomeConnectView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         username = request.data.get("username")
@@ -827,11 +866,13 @@ class HomeConnectView(APIView):
             }
         )
 
-
-@csrf_exempt
 class AdminUserManagementView(APIView):
     authentication_classes = []
     permission_classes = []
+    
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def get(self, request, *args, **kwargs):
         serializer = AdminAccessSerializer(
