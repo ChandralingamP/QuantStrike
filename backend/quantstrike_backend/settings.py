@@ -111,6 +111,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:4173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://13.203.224.240",
+    "http://ec2-13-203-224-240.ap-south-1.compute.amazonaws.com"
     *_additional_cors_origins,
 ]
 
