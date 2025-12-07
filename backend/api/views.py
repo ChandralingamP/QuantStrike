@@ -188,7 +188,6 @@ class ProfitLossMixin:
         return queryset
 
 
-@csrf_exempt
 class ProfitLossView(ProfitLossMixin, ListAPIView):
     authentication_classes = []
     permission_classes = []
@@ -243,7 +242,6 @@ class ProfitLossView(ProfitLossMixin, ListAPIView):
         )
 
 
-@csrf_exempt
 class ProfitLossExportView(ProfitLossMixin, APIView):
     authentication_classes = []
     permission_classes = []
@@ -357,7 +355,6 @@ class ProfitLossExportView(ProfitLossMixin, APIView):
         return response
 
 
-@csrf_exempt
 class StrategyAlphaRunView(APIView):
     authentication_classes = []
     permission_classes = []
