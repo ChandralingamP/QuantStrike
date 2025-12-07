@@ -4,8 +4,7 @@ import axios from "axios";
 import { getAuthUsername } from "../utils/authCookies.js";
 import { PASSWORD_RESET_STORAGE_KEY } from "./ForgotPasswordPage.jsx";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+import { API_BASE_URL } from "../utils/constants.js";
 
 export default function VerifyResetOtpPage() {
   const navigate = useNavigate();

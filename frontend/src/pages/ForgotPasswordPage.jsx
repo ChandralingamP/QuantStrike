@@ -2,9 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getAuthUsername } from "../utils/authCookies.js";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+import { API_BASE_URL } from "../utils/constants.js";
 
 export const PASSWORD_RESET_STORAGE_KEY = "quantstrike_password_reset";
 

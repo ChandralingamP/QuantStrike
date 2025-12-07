@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { setAuthUsername, setUserRole } from "../utils/authCookies.js";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+import { API_BASE_URL } from "../utils/constants.js";
 const PENDING_SIGNUP_KEY = "quantstrike_pending_signup";
 
 export default function VerifyOtpPage() {

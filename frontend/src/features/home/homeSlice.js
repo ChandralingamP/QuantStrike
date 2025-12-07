@@ -1,9 +1,7 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import axios from "axios";
 import { setCacheEntry } from "../../utils/dataCache.js";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+import { API_BASE_URL } from "../../utils/constants.js";
 
 const HOME_CACHE_NAMESPACE = "home_status";
 

@@ -2,9 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { getAuthUsername, getUserIsStaff } from "../utils/authCookies.js";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+import { API_BASE_URL } from "../utils/constants.js";
 
 export default function AdminPage() {
   const [users, setUsers] = useState([]);
