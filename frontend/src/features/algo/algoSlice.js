@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import axios from "axios";
+import apiClient from "../../utils/axiosConfig.js";
 import { getAuthUsername } from "../../utils/authCookies.js";
-import { API_BASE_URL } from "../../utils/constants.js";
 
 const extractErrorMessage = (errorPayload) => {
   if (!errorPayload) {
@@ -36,7 +35,7 @@ export const fetchAlgoConfig = createAsyncThunk(
           "Username is not available. Please sign in again."
         );
       }
-      const response = await axios.get(`${API_BASE_URL}/algo/config`, {
+      const response = await apiClient.get(`/algo/config`, {
         params: { username },
       });
       return response.data;
@@ -62,7 +61,7 @@ export const updateAlgoConfig = createAsyncThunk(
         ...updates,
         username,
       };
-      const response = await axios.put(`${API_BASE_URL}/algo/config`, payload, {
+      const response = await apiClient.put(`/algo/config`, payload, {
         params: { username },
       });
       return response.data;

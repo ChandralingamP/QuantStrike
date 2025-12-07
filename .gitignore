@@ -5,6 +5,7 @@
 !/backend/
 !/frontend/
 !/PRD/
+!.github/
 
 # Keep this gitignore file tracked
 !.gitignore

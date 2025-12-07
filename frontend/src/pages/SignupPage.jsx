@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
+import apiClient from "../utils/axiosConfig.js";
 import { getAuthUsername } from "../utils/authCookies.js";
 import { isStrongPassword } from "../utils/password.js";
 
@@ -92,12 +92,11 @@ export default function SignupPage() {
     setError("");
     setIsSubmitting(true);
 
-    axios
-      .post(
-        `${API_BASE_URL}/auth/request-otp/`,
-        { email: trimmedEmail, username: trimmedUsername },
-        { withCredentials: false }
-      )
+    apiClient
+      .post(`/auth/request-otp/`, {
+        email: trimmedEmail,
+        username: trimmedUsername,
+      })
       .then((response) => {
         const pendingPayload = {
           username: trimmedUsername,

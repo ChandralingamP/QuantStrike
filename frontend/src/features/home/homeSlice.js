@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import axios from "axios";
+import apiClient from "../../utils/axiosConfig.js";
 import { setCacheEntry } from "../../utils/dataCache.js";
-import { API_BASE_URL } from "../../utils/constants.js";
 
 const HOME_CACHE_NAMESPACE = "home_status";
 
@@ -37,7 +36,7 @@ export const fetchAccountStatus = createAsyncThunk(
       );
     }
     try {
-      const response = await axios.get(`${API_BASE_URL}/home/status/`, {
+      const response = await apiClient.get(`/home/status/`, {
         params: { username },
       });
       return response.data;
@@ -56,7 +55,7 @@ export const connectBrokerage = createAsyncThunk(
       return thunkAPI.rejectWithValue("Username is required to connect");
     }
     try {
-      const response = await axios.post(`${API_BASE_URL}/home/connect/`, {
+      const response = await apiClient.post(`/home/connect/`, {
         username,
         mpin,
         totp,

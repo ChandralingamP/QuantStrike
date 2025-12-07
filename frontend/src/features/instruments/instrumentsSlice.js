@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import axios from "axios";
+import apiClient from "../../utils/axiosConfig.js";
 import { setCacheEntry } from "../../utils/dataCache.js";
-import { API_BASE_URL } from "../../utils/constants.js";
 
 const INSTRUMENTS_CACHE_NAMESPACE = "instruments";
 
@@ -14,7 +13,7 @@ export const fetchInstruments = createAsyncThunk(
       );
     }
     try {
-      const response = await axios.get(`${API_BASE_URL}/instruments/`, {
+      const response = await apiClient.get(`/instruments/`, {
         params: { username },
       });
       return response.data;
@@ -35,11 +34,9 @@ export const updateInstrument = createAsyncThunk(
       );
     }
     try {
-      const response = await axios.put(
-        `${API_BASE_URL}/instruments/${id}/`,
-        updates,
-        { params: { username } }
-      );
+      const response = await apiClient.put(`/instruments/${id}/`, updates, {
+        params: { username },
+      });
       return response.data;
     } catch (error) {
       const payload = error.response?.data;

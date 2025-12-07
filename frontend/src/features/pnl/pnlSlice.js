@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import axios from "axios";
+import apiClient from "../../utils/axiosConfig.js";
 import { getAuthUsername } from "../../utils/authCookies.js";
-import { API_BASE_URL } from "../../utils/constants.js";
 
 export const fetchTrades = createAsyncThunk(
   "pnl/fetchTrades",
@@ -17,7 +16,7 @@ export const fetchTrades = createAsyncThunk(
       if (mode && mode !== "all") {
         params.mode = mode;
       }
-      const response = await axios.get(`${API_BASE_URL}/pnl`, {
+      const response = await apiClient.get(`/pnl`, {
         params,
       });
       return response.data;
@@ -43,7 +42,7 @@ export const exportTrades = createAsyncThunk(
       if (query.mode === "all") {
         delete query.mode;
       }
-      const response = await axios.get(`${API_BASE_URL}/pnl/export`, {
+      const response = await apiClient.get(`/pnl/export`, {
         params: query,
         responseType: "blob",
       });

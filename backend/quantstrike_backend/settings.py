@@ -23,7 +23,8 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "13.203.224.240",
-    "ec2-13-203-224-240.ap-south-1.compute.amazonaws.com"
+    "ec2-13-203-224-240.ap-south-1.compute.amazonaws.com",
+    "*"  # Allow all hosts in production (can be more restrictive later)
 ]
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -103,6 +104,8 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
     ],
 }
 

@@ -1,12 +1,11 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import axios from "axios";
-import { API_BASE_URL } from "../../utils/constants.js";
+import apiClient from "../../utils/axiosConfig.js";
 
 export const fetchStrategies = createAsyncThunk(
   "strategy/fetchStrategies",
   async (_, thunkAPI) => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/strategies/`);
+      const response = await apiClient.get(`/strategies/`);
       return response.data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -20,7 +19,7 @@ export const createStrategy = createAsyncThunk(
   "strategy/createStrategy",
   async (payload, thunkAPI) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/strategies/`, payload);
+      const response = await apiClient.post(`/strategies/`, payload);
       return response.data;
     } catch (error) {
       return thunkAPI.rejectWithValue(

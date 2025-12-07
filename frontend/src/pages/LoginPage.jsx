@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
+import apiClient from "../utils/axiosConfig.js";
 import {
   getAuthUsername,
   setAuthUsername,
@@ -83,15 +83,11 @@ export default function LoginPage() {
     setCaptchaError("");
     setIsSubmitting(true);
 
-    axios
-      .post(
-        `${API_BASE_URL}/auth/login/`,
-        {
-          username: trimmedUsername,
-          password: formState.password,
-        },
-        { withCredentials: false }
-      )
+    apiClient
+      .post(`/auth/login/`, {
+        username: trimmedUsername,
+        password: formState.password,
+      })
       .then((response) => {
         const usernameFromServer = response.data?.username || trimmedUsername;
         const isSuperuser = Boolean(response.data?.is_superuser);
