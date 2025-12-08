@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   exportTrades,
@@ -26,6 +26,8 @@ const istDateFormatter = new Intl.DateTimeFormat("en-IN", {
 
 export default function ProfitLossPage() {
   const dispatch = useDispatch();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
   const {
     entries,
     status,
@@ -42,9 +44,17 @@ export default function ProfitLossPage() {
     mode,
   } = useSelector((state) => state.pnl);
 
+  // Fetch trades on page/mode change
   useEffect(() => {
     dispatch(fetchTrades({ page, pageSize, mode }));
   }, [dispatch, page, pageSize, mode]);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    dispatch(fetchTrades({ page, pageSize, mode })).then(() => {
+      setIsRefreshing(false);
+    });
+  };
 
   const handleDownload = () => {
     dispatch(exportTrades({ page, page_size: pageSize, mode }))
@@ -141,6 +151,28 @@ export default function ProfitLossPage() {
           </div>
           <button
             type="button"
+            onClick={handleRefresh}
+            disabled={isRefreshing || status === "loading"}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Refresh table data"
+          >
+            <svg
+              className={`h-4 w-4 transition ${isRefreshing ? "animate-spin" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {isRefreshing ? "Refreshing..." : "Refresh"}
+          </button>
+          <button
+            type="button"
             onClick={handleDownload}
             disabled={exporting || status === "loading"}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-600"
@@ -199,7 +231,9 @@ export default function ProfitLossPage() {
               entries.map((trade, index) => {
                 const serial = (page - 1) * pageSize + index + 1;
                 // Use real-time P&L calculation if available, otherwise fall back to stored pnl
-                const profitValue = Number(trade.pnl_realtime ?? trade.pnl ?? trade.pl ?? 0);
+                const profitValue = Number(
+                  trade.pnl_realtime ?? trade.pnl ?? trade.pl ?? 0
+                );
                 const formattedProfit = Number.isFinite(profitValue)
                   ? currencyFormatter.format(profitValue)
                   : "—";
@@ -289,6 +323,10 @@ export default function ProfitLossPage() {
           <span>
             Showing page {page} of {totalPages} · {totalRecords} trades · Mode:{" "}
             {mode}
+          </span>
+          <span className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Live updates (every 5 seconds)
           </span>
         </div>
         <div className="flex w-full flex-1 items-center justify-center gap-2">
