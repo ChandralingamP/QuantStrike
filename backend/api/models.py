@@ -372,7 +372,7 @@ class Trade(models.Model):
             return Decimal("0")
         
         current_price = self.last_price or self.entry_price
-        if self.direction == self.Transaction.BUY:
+        if self.direction == "BUY":
             pnl = (current_price - self.entry_price) * self.quantity
         else:  # SELL
             pnl = (self.entry_price - current_price) * self.quantity
