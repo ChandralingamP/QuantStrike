@@ -79,7 +79,10 @@ class InstrumentViewSet(viewsets.ModelViewSet):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context["expiry_map"] = load_expiry_map()
+        expiry_map = load_expiry_map()
+        context["expiry_map"] = expiry_map
+        import sys
+        print(f"CONTEXT EXPIRY_MAP: {list(expiry_map.keys())}", file=sys.stderr)
         return context
 
     def _resolve_username(self):
