@@ -442,6 +442,7 @@ class TradeSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     margin_required = serializers.SerializerMethodField()
     brokerage = serializers.SerializerMethodField()
+    pnl_realtime = serializers.SerializerMethodField()
     net_pnl = serializers.SerializerMethodField()
 
     class Meta:
@@ -468,7 +469,9 @@ class TradeSerializer(serializers.ModelSerializer):
             "target_price",
             "stop_loss_price",
             "trailing_stop_price",
+            "last_price",
             "pnl",
+            "pnl_realtime",
             "margin_required",
             "brokerage",
             "net_pnl",
@@ -488,6 +491,10 @@ class TradeSerializer(serializers.ModelSerializer):
 
     def get_brokerage(self, instance: Trade) -> str:
         return str(calculate_total_brokerage(instance))
+
+    def get_pnl_realtime(self, instance: Trade) -> str:
+        """Return real-time P&L based on last_price."""
+        return str(instance.get_realtime_pnl())
 
     def get_net_pnl(self, instance: Trade) -> str:
         return str(calculate_net_pnl(instance))

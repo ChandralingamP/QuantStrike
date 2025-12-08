@@ -366,6 +366,19 @@ class Trade(models.Model):
     class Meta:
         ordering = ["-entry_datetime", "-created_at"]
 
+    def get_realtime_pnl(self) -> Decimal:
+        """Calculate P&L based on current last_price (real-time market data)."""
+        if not self.entry_price or not self.quantity:
+            return Decimal("0")
+        
+        current_price = self.last_price or self.entry_price
+        if self.direction == self.Transaction.BUY:
+            pnl = (current_price - self.entry_price) * self.quantity
+        else:  # SELL
+            pnl = (self.entry_price - current_price) * self.quantity
+        
+        return pnl.quantize(Decimal("0.01"), rounding=Decimal("ROUND_HALF_UP"))
+
     def __str__(self) -> str:  # pragma: no cover - display helper
         symbol = self.instrument.instrument if self.instrument_id else "unknown"
         return f"{self.strategy_code} {symbol} {self.execution_mode} ({self.status})"

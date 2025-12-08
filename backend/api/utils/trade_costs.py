@@ -77,8 +77,11 @@ def calculate_total_brokerage(trade) -> Decimal:
 
 
 def calculate_net_pnl(trade) -> Decimal:
-    """Gross P&L minus brokerage."""
-    pnl = _ensure_decimal(getattr(trade, "pnl", Decimal("0")))
+    """Gross P&L minus brokerage (uses real-time calculation)."""
+    if hasattr(trade, 'get_realtime_pnl'):
+        pnl = _ensure_decimal(trade.get_realtime_pnl())
+    else:
+        pnl = _ensure_decimal(getattr(trade, "pnl", Decimal("0")))
     brokerage = calculate_total_brokerage(trade)
     net = pnl - brokerage
     return _quantize(net)
