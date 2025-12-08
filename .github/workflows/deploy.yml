@@ -9,7 +9,6 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout code
@@ -55,7 +54,7 @@ jobs:
           echo "✓ Backend syntax validated"
 
       # ============================================
-      # DEPLOYMENT PHASE
+      # DEPLOYMENT PHASE - SSH Deployment
       # ============================================
 
       - name: Deploy to EC2 Ubuntu instance
@@ -63,10 +62,10 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_KEY }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
           port: 22
           script: |
-            set -e  # Exit on any error
+            set -e
 
             echo "🚀 Starting QuantStrike deployment..."
 
@@ -132,10 +131,10 @@ jobs:
             echo "🌐 Frontend: http://13.203.224.240"
             echo "📡 API: http://13.203.224.240/api"
 
-      - name: Notify deployment status
+      - name: Notify deployment success
         if: success()
         run: |
-          echo "✅ QuantStrike has been successfully deployed!"
+          echo "✅ QuantStrike deployment successful!"
           echo ""
           echo "📋 Deployment Summary:"
           echo "  - Frontend: Built and deployed"
