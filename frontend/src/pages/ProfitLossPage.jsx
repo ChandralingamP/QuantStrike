@@ -171,6 +171,7 @@ export default function ProfitLossPage() {
               <th className="whitespace-nowrap px-4 py-3">Side</th>
               <th className="whitespace-nowrap px-4 py-3">Qty</th>
               <th className="whitespace-nowrap px-4 py-3">Entry @</th>
+              <th className="whitespace-nowrap px-4 py-3">Current @</th>
               <th className="whitespace-nowrap px-4 py-3">Exit @</th>
               <th className="whitespace-nowrap px-4 py-3">P/L</th>
             </tr>
@@ -179,7 +180,7 @@ export default function ProfitLossPage() {
             {status === "loading" ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className="px-4 py-8 text-center text-sm text-slate-400"
                 >
                   Loading trades...
@@ -188,7 +189,7 @@ export default function ProfitLossPage() {
             ) : entries.length === 0 ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className="px-4 py-8 text-center text-sm text-slate-400"
                 >
                   No trade history available.
@@ -197,7 +198,8 @@ export default function ProfitLossPage() {
             ) : (
               entries.map((trade, index) => {
                 const serial = (page - 1) * pageSize + index + 1;
-                const profitValue = Number(trade.pnl ?? trade.pl ?? 0);
+                // Use real-time P&L calculation if available, otherwise fall back to stored pnl
+                const profitValue = Number(trade.pnl_realtime ?? trade.pnl ?? trade.pl ?? 0);
                 const formattedProfit = Number.isFinite(profitValue)
                   ? currencyFormatter.format(profitValue)
                   : "—";
@@ -232,6 +234,7 @@ export default function ProfitLossPage() {
                 const entryPrice = formatPrice(
                   trade.entry_price ?? trade.buy_price
                 );
+                const currentPrice = formatPrice(trade.last_price);
                 const exitPrice = formatPrice(
                   trade.exit_price ?? trade.sell_price
                 );
@@ -261,6 +264,9 @@ export default function ProfitLossPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       {entryPrice}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-cyan-300">
+                      {currentPrice}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{exitPrice}</td>
                     <td
