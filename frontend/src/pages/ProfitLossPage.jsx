@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   exportTrades,
@@ -26,7 +26,6 @@ const istDateFormatter = new Intl.DateTimeFormat("en-IN", {
 
 export default function ProfitLossPage() {
   const dispatch = useDispatch();
-  const [isRefreshing, setIsRefreshing] = useState(false);
   
   const {
     entries,
@@ -50,10 +49,7 @@ export default function ProfitLossPage() {
   }, [dispatch, page, pageSize, mode]);
 
   const handleRefresh = () => {
-    setIsRefreshing(true);
-    dispatch(fetchTrades({ page, pageSize, mode })).then(() => {
-      setIsRefreshing(false);
-    });
+    dispatch(fetchTrades({ page, pageSize, mode }));
   };
 
   const handleDownload = () => {
@@ -152,12 +148,12 @@ export default function ProfitLossPage() {
           <button
             type="button"
             onClick={handleRefresh}
-            disabled={isRefreshing || status === "loading"}
+            disabled={status === "loading"}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             title="Refresh table data"
           >
             <svg
-              className={`h-4 w-4 transition ${isRefreshing ? "animate-spin" : ""}`}
+              className="h-4 w-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -169,7 +165,7 @@ export default function ProfitLossPage() {
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               />
             </svg>
-            {isRefreshing ? "Refreshing..." : "Refresh"}
+            Refresh
           </button>
           <button
             type="button"
