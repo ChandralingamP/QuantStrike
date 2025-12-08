@@ -336,16 +336,11 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
     def get_available_expiries(self, obj: Instrument) -> list[str]:
         # Get from context, with fallback to loading directly if not in context
-        import sys
         expiry_map = self.context.get("expiry_map")
-        print(f"SERIALIZER: context keys={list(self.context.keys())}, expiry_map={list(expiry_map.keys()) if expiry_map else None}", file=sys.stderr)
         if expiry_map is None:
             from .utils.instrument_data import load_expiry_map
             expiry_map = load_expiry_map()
-            print(f"SERIALIZER: Loaded expiry_map directly: {list(expiry_map.keys())}", file=sys.stderr)
-        result = expiry_map.get(obj.instrument.upper(), [])
-        print(f"SERIALIZER: {obj.instrument} -> {result}", file=sys.stderr)
-        return result
+        return expiry_map.get(obj.instrument.upper(), [])
 
     def get_contract_expiry_date(self, obj: Instrument) -> str | None:
         return obj.contract_expiry.isoformat() if obj.contract_expiry else None
