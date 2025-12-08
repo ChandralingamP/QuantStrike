@@ -1,5 +1,5 @@
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -377,7 +377,7 @@ class Trade(models.Model):
         else:  # SELL
             pnl = (self.entry_price - current_price) * self.quantity
         
-        return pnl.quantize(Decimal("0.01"), rounding=Decimal("ROUND_HALF_UP"))
+        return pnl.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def __str__(self) -> str:  # pragma: no cover - display helper
         symbol = self.instrument.instrument if self.instrument_id else "unknown"
