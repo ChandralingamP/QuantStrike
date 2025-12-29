@@ -70,20 +70,70 @@ echo ""
 echo -e "${BLUE}Creating cron job entries...${NC}"
 echo ""
 
+# Detect server timezone and adjust cron times
+SERVER_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
+echo "   Server Timezone: $SERVER_TZ"
+
+# IST target times
+IST_INSTRUMENTS_HOUR=7
+IST_INSTRUMENTS_MIN=0
+IST_METADATA_HOUR=7
+IST_METADATA_MIN=5
+IST_STRATEGY_HOUR=9
+IST_STRATEGY_MIN=15
+
+# Convert IST to server timezone (IST = UTC + 5:30)
+if [[ "$SERVER_TZ" == "UTC" ]] || [[ "$SERVER_TZ" == "Etc/UTC" ]]; then
+    echo "   Adjusting times for UTC server (IST - 5:30)"
+    # 7:00 AM IST = 1:30 AM UTC
+    CRON_INSTRUMENTS_HOUR=1
+    CRON_INSTRUMENTS_MIN=30
+    # 7:05 AM IST = 1:35 AM UTC
+    CRON_METADATA_HOUR=1
+    CRON_METADATA_MIN=35
+    # 9:15 AM IST = 3:45 AM UTC
+    CRON_STRATEGY_HOUR=3
+    CRON_STRATEGY_MIN=45
+    TZ_NOTE="UTC (adjusted from IST)"
+elif [[ "$SERVER_TZ" == *"Kolkata"* ]] || [[ "$SERVER_TZ" == *"Asia/Kolkata"* ]]; then
+    echo "   Server already in IST - no adjustment needed"
+    CRON_INSTRUMENTS_HOUR=$IST_INSTRUMENTS_HOUR
+    CRON_INSTRUMENTS_MIN=$IST_INSTRUMENTS_MIN
+    CRON_METADATA_HOUR=$IST_METADATA_HOUR
+    CRON_METADATA_MIN=$IST_METADATA_MIN
+    CRON_STRATEGY_HOUR=$IST_STRATEGY_HOUR
+    CRON_STRATEGY_MIN=$IST_STRATEGY_MIN
+    TZ_NOTE="IST (no adjustment needed)"
+else
+    echo -e "${YELLOW}⚠ Unknown timezone: $SERVER_TZ${NC}"
+    echo "   Using IST times - may need manual adjustment!"
+    CRON_INSTRUMENTS_HOUR=$IST_INSTRUMENTS_HOUR
+    CRON_INSTRUMENTS_MIN=$IST_INSTRUMENTS_MIN
+    CRON_METADATA_HOUR=$IST_METADATA_HOUR
+    CRON_METADATA_MIN=$IST_METADATA_MIN
+    CRON_STRATEGY_HOUR=$IST_STRATEGY_HOUR
+    CRON_STRATEGY_MIN=$IST_STRATEGY_MIN
+    TZ_NOTE="$SERVER_TZ (verify manually)"
+fi
+
+echo ""
+
 CRON_FILE="/tmp/quantstrike_cron.txt"
 cat > "$CRON_FILE" << EOF
 # QuantStrike Automated Trading Scheduler
 # Generated on: $(date)
 # Environment: $ENVIRONMENT
+# Server Timezone: $TZ_NOTE
+# IST Target: 7:00 AM, 7:05 AM, 9:15 AM
 
 # 1. Update instruments and expiry data (7:00 AM IST, Mon-Fri)
-0 7 * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py update_scrip_master >> $LOG_DIR/instruments.log 2>&1
+$CRON_INSTRUMENTS_MIN $CRON_INSTRUMENTS_HOUR * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py update_scrip_master >> $LOG_DIR/instruments.log 2>&1
 
 # 2. Load instrument metadata (7:05 AM IST, Mon-Fri)
-5 7 * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py load_instrument_metadata >> $LOG_DIR/metadata.log 2>&1
+$CRON_METADATA_MIN $CRON_METADATA_HOUR * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py load_instrument_metadata --path $BACKEND_DIR/data/instruments.json >> $LOG_DIR/metadata.log 2>&1
 
 # 3. Run strategies for all active users (9:15 AM IST, Mon-Fri)
-15 9 * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py run_all_strategies --strategy strategy_alpha >> $LOG_DIR/strategies.log 2>&1
+$CRON_STRATEGY_MIN $CRON_STRATEGY_HOUR * * 1-5 cd $BACKEND_DIR && $VENV_DIR/bin/python3 manage.py run_all_strategies --strategy strategy_alpha >> $LOG_DIR/strategies.log 2>&1
 
 EOF
 
