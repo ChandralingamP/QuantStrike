@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   exportTrades,
@@ -26,7 +26,7 @@ const istDateFormatter = new Intl.DateTimeFormat("en-IN", {
 
 export default function ProfitLossPage() {
   const dispatch = useDispatch();
-  
+
   const {
     entries,
     status,
@@ -42,18 +42,27 @@ export default function ProfitLossPage() {
     exportError,
     mode,
   } = useSelector((state) => state.pnl);
+  const [strategyCode, setStrategyCode] = useState("");
 
   // Fetch trades on page/mode change
+  const [strategyLabel, setStrategyLabel] = useState("");
   useEffect(() => {
-    dispatch(fetchTrades({ page, pageSize, mode }));
-  }, [dispatch, page, pageSize, mode]);
+    dispatch(fetchTrades({ page, pageSize, mode, strategyCode }));
+  }, [dispatch, page, pageSize, mode, strategyCode]);
 
   const handleRefresh = () => {
-    dispatch(fetchTrades({ page, pageSize, mode }));
+    dispatch(fetchTrades({ page, pageSize, mode, strategyCode }));
   };
 
   const handleDownload = () => {
-    dispatch(exportTrades({ page, page_size: pageSize, mode }))
+    dispatch(
+      exportTrades({
+        page,
+        page_size: pageSize,
+        mode,
+        strategy_code: strategyCode || undefined,
+      })
+    )
       .unwrap()
       .then((blob) => {
         console.log(blob);
@@ -68,6 +77,12 @@ export default function ProfitLossPage() {
       })
       .catch(() => {
         /* errors handled via slice */
+        const strategyLabel = (() => {
+          const code = trade.strategy_code || "";
+          if (code === "strategy_alpha") return "Strategy Alpha";
+          if (code === "opening_range_breakout") return "Strategy Alpha";
+          return code || "—";
+        })();
       });
   };
 
@@ -99,6 +114,9 @@ export default function ProfitLossPage() {
   const formatPrice = (value) => {
     if (value === null || value === undefined || value === "") {
       return "—";
+      <td className="whitespace-nowrap px-4 py-3 text-center text-xs text-slate-300">
+        {strategyLabel}
+      </td>;
     }
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -111,6 +129,11 @@ export default function ProfitLossPage() {
     { value: "all", label: "All" },
     { value: "demo", label: "Demo" },
     { value: "live", label: "Live" },
+  ];
+
+  const strategyOptions = [
+    { value: "", label: "All strategies" },
+    { value: "strategy_alpha", label: "Strategy Alpha" },
   ];
 
   return (
@@ -145,6 +168,17 @@ export default function ProfitLossPage() {
               );
             })}
           </div>
+          <select
+            value={strategyCode}
+            onChange={(event) => setStrategyCode(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-slate-100 outline-none ring-brand-500/60 focus:border-brand-500 focus:ring-2"
+          >
+            {strategyOptions.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={handleRefresh}
@@ -242,6 +276,7 @@ export default function ProfitLossPage() {
                   trade.scrip ||
                   "—";
                 const tradingSymbol =
+                  trade.contract_symbol ||
                   trade.instrument_trading_symbol ||
                   trade.symbol ||
                   trade.trading_symbol ||

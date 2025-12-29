@@ -100,6 +100,24 @@ jobs:
             sleep 3
 
             # ============================================
+            # SCHEDULER SETUP (Automated Trading)
+            # ============================================
+            echo ""
+            echo "⏰ Setting up automated trading scheduler..."
+            cd /var/www/QuantStrike
+
+            # Make deploy script executable
+            chmod +x deploy-scheduler.sh
+
+            # Run scheduler setup (production mode)
+            ./deploy-scheduler.sh
+
+            echo "✅ Scheduler configured for automated trading"
+            echo "   - 7:00 AM: Instrument updates"
+            echo "   - 7:05 AM: Metadata refresh"
+            echo "   - 9:15 AM: Strategy execution for all active users"
+
+            # ============================================
             # FRONTEND DEPLOYMENT
             # ============================================
             echo ""
@@ -140,6 +158,12 @@ jobs:
           echo "  - Frontend: Built and deployed"
           echo "  - Backend: Dependencies installed, migrations run"
           echo "  - Services: Gunicorn and Nginx restarted"
+          echo "  - Scheduler: Automated trading cron jobs configured"
+          echo ""
+          echo "⏰ Automated Trading Schedule:"
+          echo "  - 7:00 AM: Instrument updates (Mon-Fri)"
+          echo "  - 7:05 AM: Metadata refresh (Mon-Fri)"
+          echo "  - 9:15 AM: Execute strategies for all active users (Mon-Fri)"
           echo ""
           echo "🌐 Access your app at: http://13.203.224.240"
 

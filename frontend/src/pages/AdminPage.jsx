@@ -148,11 +148,22 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-white">Admin Console</h1>
-        <p className="text-sm text-slate-400">
-          Manage user access to QuantStrike superuser features.
-        </p>
+      <header className="space-y-3">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold text-white">Admin Console</h1>
+          <p className="text-sm text-slate-400">
+            Manage user access to QuantStrike superuser features.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/admin/backtest")}
+            className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white shadow-brand-500/30 transition hover:bg-brand-400"
+          >
+            Open Strategy Backtesting
+          </button>
+        </div>
       </header>
 
       {error ? (

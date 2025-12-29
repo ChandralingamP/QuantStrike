@@ -147,6 +147,8 @@ class OrderExecutor:
         reference_price: Decimal,
         contract_symbol: Optional[str] = None,
         contract_token: Optional[str] = None,
+        target_price: Optional[Decimal] = None,
+        stop_loss_price: Optional[Decimal] = None,
     ) -> Dict[str, object]:
         if not self.is_live:
             return {
@@ -166,6 +168,26 @@ class OrderExecutor:
         if not contract_symbol and not contract_token:
             self._validate_instrument(instrument)
 
+        # Calculate squareoff and stoploss from entry price if provided
+        # For BUY: squareoff = target - entry, stoploss = entry - stop_loss
+        # For SELL: squareoff = entry - target, stoploss = stop_loss - entry
+        squareoff_value = "0"
+        stoploss_value = "0"
+        
+        if target_price and direction == Instrument.Transaction.BUY:
+            # BUY: profit when price goes up
+            squareoff_value = str(float(target_price - reference_price))
+        elif target_price and direction == Instrument.Transaction.SELL:
+            # SELL: profit when price goes down
+            squareoff_value = str(float(reference_price - target_price))
+            
+        if stop_loss_price and direction == Instrument.Transaction.BUY:
+            # BUY: loss when price goes down
+            stoploss_value = str(float(reference_price - stop_loss_price))
+        elif stop_loss_price and direction == Instrument.Transaction.SELL:
+            # SELL: loss when price goes up
+            stoploss_value = str(float(stop_loss_price - reference_price))
+
         payload = {
             "variety": "NORMAL",
             "tradingsymbol": symbol,
@@ -176,8 +198,8 @@ class OrderExecutor:
             "producttype": "INTRADAY",
             "duration": "DAY",
             "price": "0",
-            "squareoff": "0",
-            "stoploss": "0",
+            "squareoff": squareoff_value,
+            "stoploss": stoploss_value,
             "trailstoploss": "0",
             "quantity": str(max(quantity, 1)),
         }

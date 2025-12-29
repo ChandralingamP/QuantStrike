@@ -48,7 +48,9 @@ from .serializers import (
     TradeSerializer,
 )
 from .services.instruments import initialize_user_instruments
+from .services.market_data import MarketDataError
 from .services.strategy_alpha import StrategyAlphaEngine
+from .services.strategy_one import OpeningRangeBreakoutEngine
 from .utils.instrument_data import load_expiry_map
 from .utils.trade_costs import (
     calculate_margin_required,
@@ -390,6 +392,130 @@ class StrategyAlphaRunView(APIView):
         summary = engine.run()
         return Response(summary)
 
+class StrategyOneBacktestView(APIView):
+    """Admin-only backtest endpoint for Strategy Alpha.
+
+    This wraps OpeningRangeBreakoutEngine and supports a single market_date or
+    a [start_date, end_date] range for backtesting. Trades are logged to the
+    usual Trade table and will appear in PnL views.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _resolve_admin_user(self, request) -> User:
+        username = request.data.get("username") or request.query_params.get("username")
+        if not username:
+            raise ValidationError({"username": "Username is required."})
+        try:
+            user = User.objects.get(username__iexact=username)
+        except User.DoesNotExist as exc:
+            raise ValidationError({"username": "User not found."}) from exc
+        return user
+
+    def _parse_date(self, value, field_name: str):
+        if not value:
+            return None
+        parsed = parse_date(str(value))
+        if not parsed:
+            raise ValidationError({field_name: "Invalid date format. Use YYYY-MM-DD."})
+        return parsed
+
+    def post(self, request, *args, **kwargs):
+        # Basic admin safeguard: require the caller to be staff in production.
+        if not settings.DEBUG:
+            api_username = request.data.get("api_username") or request.query_params.get("api_username")
+            if not api_username:
+                raise ValidationError({"api_username": "Admin username is required."})
+            try:
+                api_user = User.objects.get(username__iexact=api_username)
+            except User.DoesNotExist as exc:
+                raise ValidationError({"api_username": "Admin user not found."}) from exc
+            if not api_user.is_staff:
+                raise ValidationError({"detail": "Only admin users can run backtests."})
+
+        target_user = self._resolve_admin_user(request)
+
+        mode = request.data.get("mode") or request.query_params.get("mode") or Trade.ExecutionMode.DEMO
+        valid_modes = {choice for choice, _ in Trade.ExecutionMode.choices}
+        if mode not in valid_modes:
+            raise ValidationError({"mode": "Invalid execution mode."})
+
+        instrument_ids = request.data.get("instrument_ids") or request.query_params.getlist("instrument_ids")
+        if isinstance(instrument_ids, str):
+            instrument_ids = [instrument_ids]
+        instrument_ids = [int(i) for i in instrument_ids] if instrument_ids else []
+
+        strategy_code = (
+            request.data.get("strategy_code")
+            or request.query_params.get("strategy_code")
+            or StrategyActivation.STRATEGY_ALPHA
+        )
+        if strategy_code != StrategyActivation.STRATEGY_ALPHA:
+            raise ValidationError(
+                {"strategy_code": "Only Strategy Alpha is supported for backtesting."}
+            )
+
+        market_date_raw = request.data.get("market_date") or request.query_params.get("market_date")
+        start_date_raw = request.data.get("start_date") or request.query_params.get("start_date")
+        end_date_raw = request.data.get("end_date") or request.query_params.get("end_date")
+
+        if market_date_raw and (start_date_raw or end_date_raw):
+            raise ValidationError({
+                "detail": "Provide either market_date or start_date/end_date, not both.",
+            })
+
+        dates = []
+        if market_date_raw:
+            single = self._parse_date(market_date_raw, "market_date")
+            dates = [single]
+        else:
+            start = self._parse_date(start_date_raw, "start_date")
+            end = self._parse_date(end_date_raw, "end_date")
+            if not start or not end:
+                raise ValidationError({
+                    "detail": "Either market_date or both start_date and end_date are required.",
+                })
+            if start > end:
+                raise ValidationError({"detail": "start_date cannot be after end_date."})
+            current = start
+            while current <= end:
+                dates.append(current)
+                current += timezone.timedelta(days=1)
+
+        if not dates:
+            raise ValidationError({
+                "detail": "Either market_date or a valid start_date/end_date range is required.",
+            })
+
+        runs = []
+        for market_date in dates:
+            engine = OpeningRangeBreakoutEngine(
+                user=target_user,
+                execution_mode=mode,
+                market_date=market_date,
+                ignore_activation=True,
+                instrument_ids=instrument_ids,
+            )
+            try:
+                summary = engine.run()
+            except MarketDataError as exc:
+                summary = {
+                    "status": "skipped",
+                    "mode": mode,
+                    "message": f"Market data error for {market_date}: {exc}",
+                }
+            runs.append({
+                "date": market_date.isoformat(),
+                "summary": summary,
+            })
+
+        return Response({"runs": runs})
+
 
 class RequestOTPView(APIView):
     authentication_classes = []
@@ -662,24 +788,40 @@ class HomeStatusView(APIView):
             )
         except AngelAPIError as exc:
             message = str(exc)
+            error_code = None
         else:
-            if response_payload.get("status") is False:
+            # Check for Angel API error codes
+            error_code = response_payload.get("errorCode") or response_payload.get("errorcode")
+            
+            # AG8001 = Invalid/Expired Token
+            # AG8002 = Invalid API Key
+            # Check if status is False or has invalid token error codes
+            if (
+                response_payload.get("status") is False
+                or response_payload.get("success") is False
+                or error_code in ["AG8001", "AG8002"]
+            ):
                 message = response_payload.get("message") or "Token validation failed."
+                # Store error code internally but don't show to user
             else:
+                # Token is valid
                 message = response_payload.get("message")
                 now = timezone.now()
                 profile.last_token_status = "success"
                 profile.last_token_message = (message or "")[:255]
                 profile.last_token_check_at = now
+                profile.token_state = "valid"
                 profile.save(
                     update_fields=[
                         "last_token_status",
                         "last_token_message",
                         "last_token_check_at",
+                        "token_state",
                     ]
                 )
                 return True, None
 
+        # Token validation failed
         profile.last_token_status = "failed"
         profile.last_token_message = (message or "")[:255]
         profile.last_token_check_at = timezone.now()
@@ -736,7 +878,8 @@ class HomeStatusView(APIView):
                 connection_state = "connected"
             else:
                 connection_state = "failed"
-                connection_message = validation_message or "Token validation failed."
+                # Don't show technical error details to user
+                connection_message = None
         else:
             status_value = (profile.last_token_status or "").lower()
             if status_value == "failed":

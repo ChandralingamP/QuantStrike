@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from contextlib import contextmanager
 from django.utils.dateparse import parse_date
 
@@ -76,6 +77,24 @@ class Command(BaseCommand):
                     self.stdout.write(f"  - {instrument_summary}")
             else:
                 self.stdout.write(f"{key}: {value}")
+
+        # Auto-start monitor if trades were opened
+        if summary.get("opened_trades", 0) > 0:
+            self.stdout.write("\n" + "=" * 80)
+            self.stdout.write(self.style.SUCCESS("🚀 STARTING TRADE MONITOR"))
+            self.stdout.write("=" * 80)
+            try:
+                subprocess.Popen(
+                    ["python3", "manage.py", "monitor_trades", username, "--interval", "15"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.stdout.write(self.style.SUCCESS("✅ Monitor started in background"))
+                self.stdout.write("Monitor will run until all trades are closed.")
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f"⚠️  Could not auto-start monitor: {e}"))
+                self.stdout.write(f"Please manually run: python manage.py monitor_trades {username}")
+            self.stdout.write("=" * 80 + "\n")
 
     def _get_user(self, username):
         User = get_user_model()
