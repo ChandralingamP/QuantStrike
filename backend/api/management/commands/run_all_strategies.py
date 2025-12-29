@@ -44,7 +44,7 @@ class Command(BaseCommand):
 
         # Get all users with active algo config and strategy activation
         eligible_users = User.objects.filter(
-            algo_config__algo_active=True,
+            algo_configuration__algo_active=True,
             strategy_activations__strategy_code=strategy_code,
             strategy_activations__is_active=True,
         ).distinct()
