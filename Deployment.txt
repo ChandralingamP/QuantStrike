@@ -1,0 +1,51 @@
+
+ssh -i /Users/cpanneer/Documents/Trading/AWS/Algotrade.pem ubuntu@ec2-13-203-224-240.ap-south-1.compute.amazonaws.com
+
+
+
+FRONTEND DEPLOYMENT
+
+
+1️⃣ Pull latest code on server
+cd /var/www/QuantStrike
+git pull
+
+2️⃣ Build the frontend again
+cd frontend
+npm install   # only if package.json changed
+npm run build
+sudo rm -rf /var/www/quantstrike-frontend/*
+sudo cp -r dist/* /var/www/quantstrike-frontend/
+
+4️⃣ Restart Nginx
+sudo systemctl restart nginx
+
+🔥 Frontend redeployed!
+
+
+
+
+BACKEND DEPLOYMENT:
+
+1️⃣ Restart Gunicorn
+sudo systemctl restart gunicorn
+
+2️⃣ Setup Automated Trading Scheduler (IMPORTANT!)
+cd /var/www/QuantStrike
+chmod +x deploy-scheduler.sh
+./deploy-scheduler.sh
+
+✅ This will configure cron jobs for:
+   - 7:00 AM: Update instruments/expiries
+   - 7:05 AM: Refresh metadata  
+   - 9:15 AM: Execute strategies for all active users (Mon-Fri)
+
+3️⃣ Verify scheduler setup
+crontab -l
+
+🔥 Backend redeployed with automated trading!
+
+
+
+
+NGINX SETUP (if needed):
