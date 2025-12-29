@@ -77,31 +77,33 @@ class Command(BaseCommand):
 
                 execution_mode = mode_override or activation.execution_mode
 
-                # Validate live mode requirements
+                # Validate credentials for both demo and live modes
+                # (both need real market data from Angel API)
+                try:
+                    profile = UserProfile.objects.get(user=user)
+                    if not profile.api_key or not profile.jwt_token:
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f"⏭️  Skipped: No brokerage credentials for {user.username}"
+                            )
+                        )
+                        skip_count += 1
+                        continue
+                except UserProfile.DoesNotExist:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"⏭️  Skipped: No profile found for {user.username}"
+                        )
+                    )
+                    skip_count += 1
+                    continue
+
+                # Additional validation for live mode only
                 if execution_mode == "live":
                     if not algo_config.market_active:
                         self.stdout.write(
                             self.style.WARNING(
                                 f"⏭️  Skipped: Market access disabled for {user.username}"
-                            )
-                        )
-                        skip_count += 1
-                        continue
-
-                    try:
-                        profile = UserProfile.objects.get(user=user)
-                        if not profile.api_key or not profile.jwt_token:
-                            self.stdout.write(
-                                self.style.WARNING(
-                                    f"⏭️  Skipped: No brokerage credentials for {user.username}"
-                                )
-                            )
-                            skip_count += 1
-                            continue
-                    except UserProfile.DoesNotExist:
-                        self.stdout.write(
-                            self.style.WARNING(
-                                f"⏭️  Skipped: No profile found for {user.username}"
                             )
                         )
                         skip_count += 1

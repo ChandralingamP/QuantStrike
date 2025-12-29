@@ -749,8 +749,12 @@ def build_market_data_provider(
             fallback=None,
             profile=profile,
         )
-    if execution_mode == "live":
-        # No fallback for live trading - require real data
+    
+    # Both demo and live modes use REAL market data from Angel API
+    # The only difference is order placement (simulated vs real)
+    if execution_mode == "live" or execution_mode == "demo":
+        # Use real market data for both demo and live trading
         return LiveMarketDataProvider(profile, fallback=None)
-    # Only allow demo mode when explicitly requested (no market_date and execution_mode != 'live')
+    
+    # Fallback to simulated data only if mode is not specified
     return DemoMarketDataProvider(seed=seed)
