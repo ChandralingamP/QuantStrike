@@ -1,19 +1,17 @@
 """Market data providers for strategy execution."""
 from __future__ import annotations
 
-import json
 import logging
 import random
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from django.utils import timezone
-from django.conf import settings
 
 from ..models import Instrument, UserProfile
+from .smartapi_market import SmartAPIMarketClient, SmartAPIMarketError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,23 @@ class MarketDataError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Candle:
+    """Simple OHLCV candle used for strategy backtesting.
+
+    This intentionally mirrors the shape of the historical files under
+    docs/historical-data/ and can be produced from SmartAPI responses if
+    intraday support is added later.
+    """
+
+    timestamp: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class EntrySnapshot:
     """Encapsulates market data needed for entry decisions."""
 
@@ -35,6 +50,55 @@ class EntrySnapshot:
     previous_low: Optional[Decimal] = None
     next_open: Optional[Decimal] = None
     underlying_price: Optional[Decimal] = None
+
+
+def iter_symbol_token_pairs(instrument: Instrument) -> List[tuple[str, str]]:
+    """Yield candidate (symbol, token) pairs for an instrument.
+
+    The ordering prefers explicitly configured symbols first, followed by
+    dynamically selected CE/PE contracts. Tokens are resolved via metadata
+    lookup when not persisted on the instrument.
+    """
+
+    primary_pairs = [
+        (instrument.trading_symbol, instrument.symbol_token),
+        (instrument.alternate_trading_symbol, instrument.alternate_symbol_token),
+    ]
+    daily_pairs = [
+        (instrument.daily_ce_symbol, instrument.daily_ce_token),
+        (instrument.daily_pe_symbol, instrument.daily_pe_token),
+    ]
+    if instrument.transaction == Instrument.Transaction.SELL:
+        daily_pairs = list(reversed(daily_pairs))
+
+    seen: set[tuple[str, str]] = set()
+    ordered = primary_pairs + daily_pairs
+    candidates: List[tuple[str, str]] = []
+
+    for symbol_raw, token_raw in ordered:
+        symbol = (symbol_raw or "").strip()
+        if not symbol:
+            continue
+
+        token = (token_raw or "").strip()
+        # Token must be configured in Instrument model fields
+        # No automatic lookup from external files
+
+        if not token or token == "0":
+            continue
+
+        key = (symbol.upper(), token)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append((symbol, token))
+
+    return candidates
+
+
+def resolve_symbol_token_pair(instrument: Instrument) -> Optional[tuple[str, str]]:
+    pairs = iter_symbol_token_pairs(instrument)
+    return pairs[0] if pairs else None
 
 
 class BaseMarketDataProvider:
@@ -47,6 +111,25 @@ class BaseMarketDataProvider:
         """Return the underlying index price for the instrument if available."""
 
         return None
+
+    # --- Optional candle API used by OpeningRangeBreakoutEngine ----------
+
+    def get_intraday_candles(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+    ) -> List[Candle]:
+        """Return intraday candles for [start, end].
+
+        Default implementation raises MarketDataError so that callers can
+        gracefully skip when candle data is not wired for a given provider.
+        """
+
+        raise MarketDataError("Intraday candle data is not available for this provider.")
 
     def get_entry_snapshot(self, instrument: Instrument) -> EntrySnapshot:
         """Return pricing plus contextual levels for entry checks."""
@@ -102,6 +185,10 @@ class DemoMarketDataProvider(BaseMarketDataProvider):
         jitter = Decimal(str(self._random.uniform(-150, 150)))
         value = anchor + jitter
         return value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # For backtesting via historical JSON, intraday candles are usually
+    # served by HistoricalMarketDataProvider; Demo provider keeps the
+    # BaseMarketDataProvider behaviour (no candles).
 
 
 class LiveMarketDataProvider(BaseMarketDataProvider):
@@ -197,9 +284,9 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
 
     def _resolve_index_token(self, instrument: Instrument) -> str:
         mapping = {
-            Instrument.InstrumentCode.NIFTY: "26000",
-            Instrument.InstrumentCode.BANKNIFTY: "26009",
-            Instrument.InstrumentCode.SENSEX: "1",
+            Instrument.InstrumentCode.NIFTY: "99926000",
+            Instrument.InstrumentCode.BANKNIFTY: "99926009",
+            Instrument.InstrumentCode.SENSEX: "99919000",
         }
         token = mapping.get(instrument.instrument)
         if not token:
@@ -211,76 +298,441 @@ class HistoricalDataUnavailable(MarketDataError):
     """Raised when historical data cannot be found."""
 
 
-class FileHistoricalDataSource:
-    """Loads historical quotes from JSON snapshots stored on disk."""
+class SmartAPIHistoricalProvider(BaseMarketDataProvider):
+    """Direct SmartAPI candle provider for on-demand historical runs."""
 
-    def __init__(self, root: Path) -> None:
-        self.root = root
+    def __init__(self, *, profile: Optional[UserProfile]) -> None:
+        self.profile = profile
+        self._client: Optional[SmartAPIMarketClient] = None
+        self._client_error = False
 
-    def _file_for(self, instrument: Instrument, market_date: date) -> Path:
-        slug = instrument.instrument.upper()
-        filename = f"{market_date:%Y%m%d}-{slug}.json"
-        return self.root.joinpath(filename)
+    def get_price(self, instrument: Instrument) -> Decimal:
+        snapshot = self.get_entry_snapshot(instrument)
+        return snapshot.price if snapshot else Decimal("0")
 
-    def load_quote(self, instrument: Instrument, market_date: date) -> EntrySnapshot:
-        path = self._file_for(instrument, market_date)
-        if not path.exists():
-            raise HistoricalDataUnavailable(f"Historical file missing: {path}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if "price" not in payload:
-            raise HistoricalDataUnavailable(f"Historical payload missing price: {path}")
-        price = Decimal(str(payload.get("price")))
-        previous_low = payload.get("previous_low")
-        next_open = payload.get("next_open")
-        underlying = payload.get("underlying_price")
-        return EntrySnapshot(
-            price=price,
-            previous_low=Decimal(str(previous_low)) if previous_low is not None else None,
-            next_open=Decimal(str(next_open)) if next_open is not None else None,
-            underlying_price=Decimal(str(underlying)) if underlying is not None else None,
+    def get_entry_snapshot(self, instrument: Instrument) -> EntrySnapshot:
+        candles = self._fetch_candles_for_instrument(
+            instrument=instrument,
+            start=self._session_start(),
+            end=self._session_start() + timedelta(minutes=5),
         )
+        if not candles:
+            raise MarketDataError("SmartAPI historical data unavailable for instrument.")
+        first = candles[0]
+        return EntrySnapshot(price=first.open)
+
+    def get_intraday_candles(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+    ) -> List[Candle]:
+        candles = self._fetch_candles(
+            symbol=symbol,
+            token=token,
+            interval=interval,
+            start=start,
+            end=end,
+            exchange=None,
+        )
+        if candles is None:
+            raise MarketDataError("SmartAPI historical candles unavailable.")
+        return candles
+
+    def _fetch_candles_for_instrument(
+        self,
+        *,
+        instrument: Instrument,
+        start: datetime,
+        end: datetime,
+    ) -> Optional[List[Candle]]:
+        pair = resolve_symbol_token_pair(instrument)
+        if not pair:
+            return None
+        symbol, token = pair
+        return self._fetch_candles(
+            symbol=symbol,
+            token=token,
+            interval="FIVE_MINUTE",
+            start=start,
+            end=end,
+            exchange=instrument.exchange,
+        )
+
+    def _fetch_candles(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        exchange: Optional[str],
+    ) -> Optional[List[Candle]]:
+        client = self._ensure_client()
+        if not client:
+            return None
+        resolved_exchange = exchange or self._exchange_for_slug(symbol)
+        logger.info(
+            "SmartAPI get_option_candles",
+            extra={
+                "exchange": resolved_exchange,
+                "symbol_token": token,
+                "interval": interval,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        try:
+            api_candles = client.get_option_candles(
+                exchange=resolved_exchange,
+                symbol_token=token,
+                interval=interval,
+                start=start,
+                end=end,
+            )
+        except SmartAPIMarketError as exc:
+            logger.warning("SmartAPI fallback failed for %s (%s): %s", symbol, token, exc)
+            return None
+
+        tz = timezone.get_current_timezone()
+        start_local = self._as_local(start, tz)
+        end_local = self._as_local(end, tz)
+        candles: List[Candle] = []
+        for candle in api_candles:
+            ts = candle.timestamp.astimezone(tz)
+            if ts < start_local or ts > end_local:
+                continue
+            candles.append(
+                Candle(
+                    timestamp=ts,
+                    open=candle.open,
+                    high=candle.high,
+                    low=candle.low,
+                    close=candle.close,
+                    volume=candle.volume,
+                )
+            )
+        return candles
+
+    def _resolve_token(self, instrument: Instrument) -> Optional[str]:
+        pair = resolve_symbol_token_pair(instrument)
+        return pair[1] if pair else None
+
+    def _ensure_client(self) -> Optional[SmartAPIMarketClient]:
+        if self._client_error:
+            return None
+        if self._client is not None:
+            return self._client
+        profile = self.profile
+        if not profile or not profile.api_key or not profile.jwt_token:
+            self._client_error = True
+            return None
+        try:
+            self._client = SmartAPIMarketClient(
+                api_key=profile.api_key,
+                jwt_token=profile.jwt_token,
+            )
+            return self._client
+        except SmartAPIMarketError as exc:
+            logger.warning("Unable to create SmartAPI client: %s", exc)
+            self._client_error = True
+            return None
+
+    @staticmethod
+    def _exchange_for_slug(value: str) -> str:
+        upper_value = str(value).upper()
+        if upper_value.startswith("SENSEX"):
+            return "BFO"
+        return "NFO"
+
+    @staticmethod
+    def _session_start() -> datetime:
+        today = timezone.localdate()
+        dt = datetime.combine(today, time(9, 15))
+        if timezone.is_naive(dt):
+            return timezone.make_aware(dt)
+        return dt
+
+    @staticmethod
+    def _as_local(value: datetime, tz) -> datetime:
+        if value.tzinfo is None:
+            return timezone.make_aware(value, tz)
+        return value.astimezone(tz)
 
 
 class HistoricalMarketDataProvider(BaseMarketDataProvider):
-    """Serves quotes from a historical data source, with optional fallback."""
+    """Serves quotes from SmartAPI for historical backtesting, with demo fallback."""
 
     def __init__(
         self,
         *,
         market_date: date,
-        data_source: Optional[FileHistoricalDataSource] = None,
         fallback: Optional[BaseMarketDataProvider] = None,
+        profile: Optional[UserProfile] = None,
     ) -> None:
-        if data_source is None:
-            root = getattr(settings, "HISTORICAL_DATA_ROOT", "")
-            if not root:
-                raise HistoricalDataUnavailable("HISTORICAL_DATA_ROOT is not configured.")
-            data_source = FileHistoricalDataSource(Path(root))
+        if not profile or not profile.api_key or not profile.jwt_token:
+            raise HistoricalDataUnavailable(
+                "SmartAPI credentials required for historical data. Profile missing or incomplete."
+            )
         self.market_date = market_date
-        self.data_source = data_source
         self.fallback = fallback
+        self.profile = profile
+        self._smart_client: Optional[SmartAPIMarketClient] = None
+        self._smart_client_error = False
 
     def get_price(self, instrument: Instrument) -> Decimal:
-        snapshot = self.data_source.load_quote(instrument, self.market_date)
-        return snapshot.price
+        snapshot = self._fetch_live_snapshot(instrument)
+        if snapshot:
+            return snapshot.price
+        raise HistoricalDataUnavailable(
+            f"Unable to fetch price for {instrument}. "
+            f"Please check your API connection or try reconnecting your brokerage account."
+        )
 
     def get_entry_snapshot(self, instrument: Instrument) -> EntrySnapshot:
-        try:
-            return self.data_source.load_quote(instrument, self.market_date)
-        except HistoricalDataUnavailable as exc:
-            if not self.fallback:
-                raise
-            logger.warning("Historical data missing (%s); using fallback provider.", exc)
-            return self.fallback.get_entry_snapshot(instrument)
+        snapshot = self._fetch_live_snapshot(instrument)
+        if snapshot:
+            return snapshot
+        raise HistoricalDataUnavailable(
+            f"Unable to fetch entry snapshot for {instrument}. "
+            f"Please check your API connection or try reconnecting your brokerage account."
+        )
 
     def get_underlying_price(self, instrument: Instrument) -> Optional[Decimal]:
+        client = self._ensure_smart_client()
+        if not client:
+            raise HistoricalDataUnavailable(
+                f"SmartAPI client not available. Please reconnect your brokerage account."
+            )
+        
         try:
-            snapshot = self.data_source.load_quote(instrument, self.market_date)
-            return snapshot.underlying_price
+            index_token = self._resolve_index_token(instrument)
+            index_symbol = instrument.instrument or ""
+            
+            # Check if we're running for today (real-time) or past date (backtesting)
+            from django.utils import timezone
+            today = timezone.now().date()
+            market_date = self.market_date.date() if hasattr(self.market_date, 'date') else self.market_date
+            
+            is_today = market_date == today
+            
+            if is_today:
+                # Real-time trading: Use OHLC API for today's opening price
+                logger.info(f"📊 Real-time mode: Fetching OHLC for {index_symbol} (token: {index_token})")
+                ohlc_data = client.get_ohlc(exchange="NSE", token=index_token)
+                
+                if ohlc_data and ohlc_data.get("open") is not None:
+                    underlying_price = Decimal(str(ohlc_data["open"]))
+                    logger.info(f"✅ Found underlying opening price for {index_symbol}: ₹{underlying_price}")
+                    logger.info(f"   OHLC Data - Open: {ohlc_data['open']}, High: {ohlc_data['high']}, "
+                               f"Low: {ohlc_data['low']}, Close: {ohlc_data['close']}, LTP: {ohlc_data['ltp']}")
+                    return underlying_price
+                else:
+                    raise HistoricalDataUnavailable(
+                        f"No OHLC data available for {index_symbol}. "
+                        f"The market might be closed or your API connection has expired."
+                    )
+            else:
+                # Backtesting mode: Use historical candles API for past date at 9:15 AM
+                logger.info(f"📈 Backtesting mode: Fetching historical candles for {index_symbol}")
+                session_start = datetime.combine(self.market_date, time(9, 15))
+                start_dt = session_start
+                if timezone.is_naive(start_dt):
+                    start_dt = timezone.make_aware(start_dt)
+                end_dt = start_dt
+                
+                candles = self._fetch_live_candles(
+                    symbol=index_symbol,
+                    token=index_token,
+                    interval="ONE_MINUTE",
+                    start=start_dt,
+                    end=end_dt,
+                    exchange="NSE",
+                )
+                
+                if candles:
+                    underlying_price = Decimal(str(candles[0].open))
+                    logger.info(f"✅ Found underlying price for {index_symbol} at {start_dt}: ₹{underlying_price}")
+                    return underlying_price
+                else:
+                    raise HistoricalDataUnavailable(
+                        f"No price data available for {index_symbol} at {start_dt}. "
+                        f"The market might be closed or your API connection has expired."
+                    )
         except HistoricalDataUnavailable:
-            if self.fallback:
-                return self.fallback.get_underlying_price(instrument)
+            raise
+        except Exception as exc:
+            logger.error(f"SmartAPI fetch failed for {instrument.instrument}: {exc}", exc_info=True)
+            raise HistoricalDataUnavailable(
+                f"Failed to fetch underlying price for {instrument.instrument}: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _resolve_index_token(instrument: Instrument) -> str:
+        """Map instrument to its NSE index token for SmartAPI."""
+        mapping = {
+            Instrument.InstrumentCode.NIFTY: "99926000",
+            Instrument.InstrumentCode.BANKNIFTY: "99926009",
+            Instrument.InstrumentCode.SENSEX: "99919000",
+        }
+        token = mapping.get(instrument.instrument)
+        if not token:
+            raise MarketDataError(f"No index token configured for {instrument.instrument}.")
+        return token
+
+    # SmartAPI helpers --------------------------------------------------
+
+    def _fetch_live_snapshot(self, instrument: Instrument) -> Optional[EntrySnapshot]:
+        client = self._ensure_smart_client()
+        if not client:
             return None
+
+        pair = resolve_symbol_token_pair(instrument)
+        if not pair:
+            return None
+        symbol, token = pair
+
+        exchange = instrument.exchange or self._exchange_for_slug(symbol)
+        session_start = datetime.combine(self.market_date, time(9, 15))
+        start_dt = session_start
+        if timezone.is_naive(start_dt):
+            start_dt = timezone.make_aware(start_dt)
+        end_dt = start_dt + timedelta(minutes=5)
+
+        candles = self._fetch_live_candles(
+            symbol=symbol,
+            token=token,
+            interval="FIVE_MINUTE",
+            start=start_dt,
+            end=end_dt,
+            exchange=exchange,
+        )
+        if not candles:
+            return None
+
+        first = candles[0]
+        return EntrySnapshot(
+            price=first.open,
+            previous_low=None,
+            next_open=None,
+            underlying_price=None,
+        )
+
+    def _fetch_live_candles(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        exchange: Optional[str] = None,
+    ) -> Optional[List[Candle]]:
+        client = self._ensure_smart_client()
+        if not client:
+            return None
+        sanitized_token = token.strip()
+        if not sanitized_token or sanitized_token == "0":
+            return None
+
+        resolved_exchange = exchange or self._exchange_for_slug(symbol)
+
+        print(f"🔍 Fetching candles: exchange={resolved_exchange}, token={sanitized_token}, interval={interval}, start={start}, end={end}")
+        
+        try:
+            api_candles = client.get_option_candles(
+                exchange=resolved_exchange,
+                symbol_token=sanitized_token,
+                interval=interval,
+                start=start,
+                end=end,
+            )
+            print(f"✅ SmartAPI returned {len(api_candles) if api_candles else 0} candles")
+        except SmartAPIMarketError as exc:
+            print(f"❌ SmartAPI error: {exc}")
+            logger.warning("SmartAPI candle fetch failed for %s (%s): %s", symbol, token, exc)
+            return None
+
+        tz = timezone.get_current_timezone()
+        if start.tzinfo is None:
+            start_local = timezone.make_aware(start, tz)
+        else:
+            start_local = start.astimezone(tz)
+        if end.tzinfo is None:
+            end_local = timezone.make_aware(end, tz)
+        else:
+            end_local = end.astimezone(tz)
+        candles: List[Candle] = []
+        for candle in api_candles:
+            ts = candle.timestamp.astimezone(tz)
+            if ts < start_local or ts > end_local:
+                continue
+            candles.append(
+                Candle(
+                    timestamp=ts,
+                    open=candle.open,
+                    high=candle.high,
+                    low=candle.low,
+                    close=candle.close,
+                    volume=candle.volume,
+                )
+            )
+        return candles
+
+    def _ensure_smart_client(self) -> Optional[SmartAPIMarketClient]:
+        if self._smart_client_error:
+            return None
+        if self._smart_client is not None:
+            return self._smart_client
+        profile = self.profile
+        if not profile or not profile.api_key or not profile.jwt_token:
+            self._smart_client_error = True
+            return None
+        try:
+            self._smart_client = SmartAPIMarketClient(
+                api_key=profile.api_key,
+                jwt_token=profile.jwt_token,
+            )
+            return self._smart_client
+        except SmartAPIMarketError as exc:
+            logger.info("SmartAPI market client unavailable: %s", exc)
+            self._smart_client_error = True
+            return None
+
+    @staticmethod
+    def _exchange_for_slug(value: str) -> str:
+        upper_value = str(value).upper()
+        if upper_value.startswith("SENSEX"):
+            return "BFO"
+        return "NFO"
+
+    def get_intraday_candles(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+    ) -> List[Candle]:
+        candles = self._fetch_live_candles(
+            symbol=symbol,
+            token=token,
+            interval=interval,
+            start=start,
+            end=end,
+        )
+        if candles is not None:
+            return candles
+        
+        raise HistoricalDataUnavailable(
+            f"Unable to fetch intraday candles for {symbol} ({token}). "
+            f"Please check your API connection or try reconnecting your brokerage account."
+        )
 
 
 def build_market_data_provider(
@@ -290,17 +742,15 @@ def build_market_data_provider(
     seed: Optional[int] = None,
     market_date: Optional[date] = None,
 ) -> BaseMarketDataProvider:
-    if market_date and market_date < timezone.now().date():
-        fallback = DemoMarketDataProvider(seed=seed or int(market_date.strftime("%Y%m%d")))
-        try:
-            return HistoricalMarketDataProvider(
-                market_date=market_date,
-                fallback=fallback,
-            )
-        except HistoricalDataUnavailable:
-            logger.warning("Historical data unavailable for %s; falling back to demo feed.", market_date)
-            return fallback
+    if market_date:
+        # No fallback - fail fast if SmartAPI is not available
+        return HistoricalMarketDataProvider(
+            market_date=market_date,
+            fallback=None,
+            profile=profile,
+        )
     if execution_mode == "live":
-        fallback = DemoMarketDataProvider(seed=seed or int(timezone.now().timestamp()))
-        return LiveMarketDataProvider(profile, fallback=fallback)
+        # No fallback for live trading - require real data
+        return LiveMarketDataProvider(profile, fallback=None)
+    # Only allow demo mode when explicitly requested (no market_date and execution_mode != 'live')
     return DemoMarketDataProvider(seed=seed)

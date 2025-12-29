@@ -19,10 +19,8 @@ const applyAccountStatus = (state, payload) => {
   state.status = "succeeded";
   state.details = payload;
   state.connection.status = mapConnectionStatus(payload?.connection_state);
-  state.connection.message =
-    state.connection.status === "failed"
-      ? payload?.connection_message || "Unable to validate session"
-      : null;
+  // Don't show error messages for failed connections - just show "Disconnected" badge
+  state.connection.message = null;
   state.connection.lastConnectedAt =
     payload?.last_connected_at || state.connection.lastConnectedAt;
 };

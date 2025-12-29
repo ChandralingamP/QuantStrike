@@ -11,6 +11,7 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage.jsx";
 import VerifyResetOtpPage from "./pages/VerifyResetOtpPage.jsx";
 import ResetPasswordPage from "./pages/ResetPasswordPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import StrategyBacktestPage from "./pages/StrategyBacktestPage.jsx";
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="pnl" element={<ProfitLossPage />} />
           <Route path="algo" element={<AlgoConfigurationPage />} />
           <Route path="admin" element={<AdminPage />} />
+          <Route path="admin/backtest" element={<StrategyBacktestPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

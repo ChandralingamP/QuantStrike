@@ -4,7 +4,10 @@ import { getAuthUsername } from "../../utils/authCookies.js";
 
 export const fetchTrades = createAsyncThunk(
   "pnl/fetchTrades",
-  async ({ page = 1, pageSize = 20, mode } = {}, thunkAPI) => {
+  async (
+    { page = 1, pageSize = 20, mode = "all", strategyCode = "" } = {},
+    thunkAPI
+  ) => {
     try {
       const username = getAuthUsername();
       if (!username) {
@@ -15,6 +18,9 @@ export const fetchTrades = createAsyncThunk(
       const params = { page, page_size: pageSize, username };
       if (mode && mode !== "all") {
         params.mode = mode;
+      }
+      if (strategyCode) {
+        params.strategy_code = strategyCode;
       }
       const response = await apiClient.get(`/pnl`, {
         params,

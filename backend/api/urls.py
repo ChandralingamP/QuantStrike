@@ -17,6 +17,7 @@ from .views import (
     SignupView,
     StrategyViewSet,
     StrategyAlphaRunView,
+    StrategyOneBacktestView,
 )
 
 router = DefaultRouter()
@@ -56,6 +57,11 @@ urlpatterns = [
         "strategy/alpha/run",
         StrategyAlphaRunView.as_view(),
         name="strategy-alpha-run",
+    ),
+    path(
+        "strategy/one/backtest/",
+        StrategyOneBacktestView.as_view(),
+        name="strategy-one-backtest",
     ),
     path("", include(router.urls)),
 ]

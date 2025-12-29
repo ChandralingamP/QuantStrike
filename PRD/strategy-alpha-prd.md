@@ -26,7 +26,7 @@
    - If `strike_selection = atm`, compute CE/PE symbols using current underlying price rounded to `strike_step`.
    - Persist daily CE/PE symbol + token and underlying price for reuse during the day.
 3. **Previous session levels:**
-   - For ATM BUY legs, pull previous day (14:45-15:30) five-minute candles to determine `daily_*_prev_high/low`.
+   - For ATM BUY legs, pull previous day (14:45-15:29) five-minute candles to determine `daily_*_prev_high/low`.
    - Persist to instrument to avoid redundant fetches.
 4. **Intraday monitoring:**
    - Retrieve five-minute candles for the day.

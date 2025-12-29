@@ -541,6 +541,9 @@ class AlgoConfigurationSerializer(serializers.ModelSerializer):
         instrument_qs = self.context.get("instrument_qs")
         if instrument_qs is None:
             instrument_qs = Instrument.objects.filter(user=user).order_by("instrument")
+        
+        # Only show active instruments in the strategy selection
+        instrument_qs = instrument_qs.filter(active=True)
 
         selected_ids = list(
             activation.selected_instruments.values_list("id", flat=True)

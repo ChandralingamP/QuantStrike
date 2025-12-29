@@ -202,9 +202,11 @@ class AlgoConfiguration(models.Model):
 
 class StrategyActivation(models.Model):
     STRATEGY_ALPHA = "strategy_alpha"
+    STRATEGY_OPENING_RANGE_BREAKOUT = "opening_range_breakout"
 
     STRATEGY_CHOICES = [
         (STRATEGY_ALPHA, "Strategy Alpha"),
+        (STRATEGY_OPENING_RANGE_BREAKOUT, "Opening Range Breakout"),
     ]
 
     class ExecutionMode(models.TextChoices):
