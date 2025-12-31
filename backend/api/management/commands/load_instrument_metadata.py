@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from django.conf import settings
@@ -57,21 +58,37 @@ class Command(BaseCommand):
                 continue
 
             dirty = False
+            update_fields = []
+            
+            # Update trading metadata fields
             for field in ("trading_symbol", "symbol_token", "exchange", "lot_size"):
                 if field in payload and payload[field] is not None:
                     value = payload[field]
                     if getattr(instrument, field) != value:
                         setattr(instrument, field, value)
                         dirty = True
+                        if field not in update_fields:
+                            update_fields.append(field)
+            
+            # Update contract_expiry if present in metadata
+            if "expiry" in payload and payload["expiry"]:
+                expiry_str = str(payload["expiry"]).strip()
+                if expiry_str:
+                    # Parse expiry date (format: DDMMMYYYY, e.g., 27JAN2026)
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, "%d%b%Y").date()
+                        if instrument.contract_expiry != expiry_date:
+                            instrument.contract_expiry = expiry_date
+                            dirty = True
+                            if "contract_expiry" not in update_fields:
+                                update_fields.append("contract_expiry")
+                    except (ValueError, AttributeError):
+                        # Skip invalid expiry dates
+                        pass
 
             if dirty:
-                instrument.save(update_fields=[
-                    "trading_symbol",
-                    "symbol_token",
-                    "exchange",
-                    "lot_size",
-                    "updated_at",
-                ])
+                update_fields.append("updated_at")
+                instrument.save(update_fields=update_fields)
                 updated += 1
                 self.stdout.write(self.style.SUCCESS(
                     f"Updated {instrument.instrument} for {instrument.user.username}"
@@ -117,6 +134,7 @@ class Command(BaseCommand):
                     "symbol_token": entry.get("token"),
                     "exchange": entry.get("exch_seg"),
                     "lot_size": entry.get("lotsize"),
+                    "expiry": entry.get("expiry"),
                 })
                 # First occurrence wins; assumes file sorted by relevance
                 normalized.setdefault(code, payload)
