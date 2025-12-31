@@ -763,9 +763,6 @@ class StrategyAlphaEngine:
                 continue
 
             next_candle = candles[index + 1]
-            gap = (next_candle.open - current_low).copy_abs()
-            if gap > Decimal("40"):
-                return EntryPlan(False, message="gap_exceeded", stop_loss=current_low)
 
             entry_time = next_candle.timestamp
             if entry_time > now_local:
