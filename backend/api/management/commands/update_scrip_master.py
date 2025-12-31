@@ -183,11 +183,12 @@ class Command(BaseCommand):
         cutoff_date = current_date.replace(day=1) + timedelta(days=90)  # ~3 months
         
         for name, expiries in expiry_map.items():
-            # Parse and filter expiries within 3 months
+            # Parse and filter expiries: must be future dates within 3 months
             filtered_expiries = []
             for exp in expiries:
                 exp_dt = self._parse_expiry(exp)
-                if exp_dt and exp_dt <= cutoff_date:
+                # Only include expiries that are today or in the future, and within 3 months
+                if exp_dt and exp_dt.date() >= current_date.date() and exp_dt <= cutoff_date:
                     filtered_expiries.append(exp)
             
             # Sort filtered expiries
