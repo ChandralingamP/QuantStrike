@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -401,18 +402,38 @@ class StrategyAlphaEngine:
             "instrument_summaries": [],
         }
 
-        with transaction.atomic():
-            for instrument in instruments:
-                instrument_summary = self._process_instrument(
+        # Process all instruments in parallel for simultaneous execution
+        with ThreadPoolExecutor(max_workers=len(instruments)) as executor:
+            # Submit all instruments for parallel execution
+            future_to_instrument = {
+                executor.submit(
+                    self._process_instrument,
                     instrument=instrument,
                     provider=provider,
                     execution_mode=execution_mode,
                     order_executor=order_executor,
-                )
-                summary["opened_trades"] += instrument_summary.opened
-                summary["closed_trades"] += instrument_summary.closed
-                summary["net_pnl"] += instrument_summary.pnl
-                summary["instrument_summaries"].append(instrument_summary.as_dict())
+                ): instrument
+                for instrument in instruments
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_instrument):
+                instrument = future_to_instrument[future]
+                try:
+                    instrument_summary = future.result()
+                    summary["opened_trades"] += instrument_summary.opened
+                    summary["closed_trades"] += instrument_summary.closed
+                    summary["net_pnl"] += instrument_summary.pnl
+                    summary["instrument_summaries"].append(instrument_summary.as_dict())
+                except Exception as exc:
+                    self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
+                    # Add failed instrument to summary
+                    summary["instrument_summaries"].append({
+                        "instrument": instrument.instrument,
+                        "opened": 0,
+                        "closed": 0,
+                        "message": f"Error: {str(exc)}",
+                    })
 
         summary["net_pnl"] = str(summary["net_pnl"])
         return summary

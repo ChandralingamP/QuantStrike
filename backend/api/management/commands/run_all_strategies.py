@@ -3,6 +3,7 @@ Management command to run strategies for all active users automatically.
 Designed for cron/scheduled execution.
 """
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
@@ -63,7 +64,49 @@ class Command(BaseCommand):
         error_count = 0
         monitor_started_count = 0
 
-        for user in eligible_users:
+        # Process all users in parallel for simultaneous execution
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all users for parallel execution
+            future_to_user = {
+                executor.submit(self._process_user, user, strategy_code, mode_override): user
+                for user in eligible_users
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_user):
+                user = future_to_user[future]
+                try:
+                    result = future.result()
+                    if result['status'] == 'success':
+                        success_count += 1
+                        if result.get('monitor_started'):
+                            monitor_started_count += 1
+                    elif result['status'] == 'skip':
+                        skip_count += 1
+                    else:
+                        error_count += 1
+                except Exception as e:
+                    self.stdout.write(
+                        self.style.ERROR(f"❌ {user.username}: Unexpected error - {str(e)}")
+                    )
+                    error_count += 1
+
+        # Final summary
+        self.stdout.write("\n" + "=" * 80)
+        self.stdout.write(self.style.SUCCESS("📊 EXECUTION SUMMARY"))
+        self.stdout.write("=" * 80)
+        self.stdout.write(f"✅ Success: {success_count} user(s)")
+        self.stdout.write(f"⏭️  Skipped: {skip_count} user(s)")
+        self.stdout.write(f"❌ Errors: {error_count} user(s)")
+        self.stdout.write(f"🔍 Monitors Started: {monitor_started_count} user(s)")
+        self.stdout.write(f"⏰ Completed at: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.stdout.write("=" * 80 + "\n")
+
+    def _process_user(self, user, strategy_code, mode_override):
+        """Process a single user's strategy execution (called in parallel)."""
+        result = {'status': 'error', 'monitor_started': False}
+
+        try:
             self.stdout.write("\n" + "─" * 80)
             self.stdout.write(f"👤 Processing: {user.username}")
             self.stdout.write("─" * 80)
@@ -87,16 +130,16 @@ class Command(BaseCommand):
                                 f"⏭️  Skipped: No brokerage credentials for {user.username}"
                             )
                         )
-                        skip_count += 1
-                        continue
+                        result['status'] = 'skip'
+                        return result
                 except UserProfile.DoesNotExist:
                     self.stdout.write(
                         self.style.WARNING(
                             f"⏭️  Skipped: No profile found for {user.username}"
                         )
                     )
-                    skip_count += 1
-                    continue
+                    result['status'] = 'skip'
+                    return result
 
                 # Additional validation for live mode only
                 if execution_mode == "live":
@@ -106,25 +149,25 @@ class Command(BaseCommand):
                                 f"⏭️  Skipped: Market access disabled for {user.username}"
                             )
                         )
-                        skip_count += 1
-                        continue
+                        result['status'] = 'skip'
+                        return result
 
                 # Run strategy
                 cmd = ["python3", "manage.py", "run_strategy_alpha", user.username]
                 if mode_override:
                     cmd.extend(["--mode", mode_override])
 
-                result = subprocess.run(
+                subprocess_result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=120,  # 2 minute timeout
                 )
 
-                if result.returncode == 0:
+                if subprocess_result.returncode == 0:
                     # Check if trades were opened (to start monitor)
-                    if "opened_trades" in result.stdout and "Monitor started" in result.stdout:
-                        monitor_started_count += 1
+                    if "opened_trades" in subprocess_result.stdout and "Monitor started" in subprocess_result.stdout:
+                        result['monitor_started'] = True
                         self.stdout.write(
                             self.style.SUCCESS(
                                 f"✅ {user.username}: Strategy executed, monitor started"
@@ -136,11 +179,11 @@ class Command(BaseCommand):
                                 f"✅ {user.username}: Strategy executed"
                             )
                         )
-                    success_count += 1
+                    result['status'] = 'success'
 
                     # Show summary
-                    if "opened_trades" in result.stdout:
-                        for line in result.stdout.split("\n"):
+                    if "opened_trades" in subprocess_result.stdout:
+                        for line in subprocess_result.stdout.split("\n"):
                             if "opened_trades" in line or "closed_trades" in line or "net_pnl" in line:
                                 self.stdout.write(f"   {line.strip()}")
                 else:
@@ -149,26 +192,17 @@ class Command(BaseCommand):
                             f"⏭️  {user.username}: Strategy skipped or no conditions met"
                         )
                     )
-                    skip_count += 1
+                    result['status'] = 'skip'
 
             except subprocess.TimeoutExpired:
                 self.stdout.write(
                     self.style.ERROR(f"❌ {user.username}: Execution timeout (>2 min)")
                 )
-                error_count += 1
+                result['status'] = 'error'
             except Exception as e:
                 self.stdout.write(
                     self.style.ERROR(f"❌ {user.username}: Error - {str(e)}")
                 )
-                error_count += 1
+                result['status'] = 'error'
 
-        # Final summary
-        self.stdout.write("\n" + "=" * 80)
-        self.stdout.write(self.style.SUCCESS("📊 EXECUTION SUMMARY"))
-        self.stdout.write("=" * 80)
-        self.stdout.write(f"✅ Success: {success_count} user(s)")
-        self.stdout.write(f"⏭️  Skipped: {skip_count} user(s)")
-        self.stdout.write(f"❌ Errors: {error_count} user(s)")
-        self.stdout.write(f"🔍 Monitors Started: {monitor_started_count} user(s)")
-        self.stdout.write(f"⏰ Completed at: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.stdout.write("=" * 80 + "\n")
+        return result
