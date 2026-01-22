@@ -22,6 +22,12 @@ echo ""
 echo "🔧 Deploying backend..."
 cd /var/www/QuantStrike/backend
 
+# Activate virtual environment if it exists
+if [ -d "venv" ]; then
+    echo "🐍 Activating virtual environment..."
+    source venv/bin/activate
+fi
+
 # Install dependencies
 echo "📦 Installing Python dependencies..."
 pip install -r requirements.txt
