@@ -10,6 +10,10 @@
 # Keep this gitignore file tracked
 !.gitignore
 
+# Allow deployment and documentation files
+!*.sh
+!*.md
+
 # Backend ignores
 backend/data/instruments.json
 backend/data/instruments_expiries.json
