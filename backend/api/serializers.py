@@ -361,9 +361,11 @@ class InstrumentSerializer(serializers.ModelSerializer):
             )
             expiry_map = self.context.get("expiry_map") or {}
             allowed_values = {value.upper() for value in expiry_map.get(instrument_code.upper(), [])}
+            # Only validate against allowed values if the expiry map is loaded and has entries
+            # This prevents validation failures when the expiry data files are missing/not synced yet
             if allowed_values and expiry_code.upper() not in allowed_values:
                 raise serializers.ValidationError(
-                    {"contract_expiry": "Expiry is not available for this instrument."}
+                    {"contract_expiry": f"Expiry {expiry_code} is not available for this instrument. Available expiries: {', '.join(sorted(allowed_values))}"}
                 )
             data["_parsed_expiry"] = expiry
 
