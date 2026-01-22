@@ -45,12 +45,16 @@ echo "📊 Ensuring instrument data files are up to date..."
 if [ ! -f "data/instruments_expiries.json" ] || [ ! -f "data/instruments.json" ]; then
     echo "⚠️  Instrument data files missing. Running update_scrip_master..."
     python manage.py update_scrip_master || echo "⚠️  Warning: Could not update scrip master. Please run manually."
+    echo "🔄 Rolling forward expired contracts in database..."
+    python manage.py update_instruments || echo "⚠️  Warning: Could not update instruments in database"
 else
     echo "✅ Instrument data files exist"
     # Optionally update if files are older than 7 days
     if find data/instruments_expiries.json -mtime +7 | grep -q .; then
         echo "⚠️  Instrument data is older than 7 days. Updating..."
         python manage.py update_scrip_master || echo "⚠️  Warning: Could not update scrip master"
+        echo "🔄 Rolling forward expired contracts in database..."
+        python manage.py update_instruments || echo "⚠️  Warning: Could not update instruments in database"
     fi
 fi
 
