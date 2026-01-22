@@ -1,10 +1,13 @@
 # Instrument Update Failed - Troubleshooting Guide
 
 ## Problem
+
 When trying to update instrument values in production, you're getting an "Update Failed" error message.
 
 ## Root Cause
+
 The issue is caused by **missing or empty instrument expiry data files** in the production environment. Specifically:
+
 - `/var/www/QuantStrike/backend/data/instruments.json`
 - `/var/www/QuantStrike/backend/data/instruments_expiries.json`
 
@@ -13,6 +16,7 @@ When these files are missing or empty, the instrument serializer validation fail
 ## Immediate Fix (Production)
 
 ### Step 1: SSH into your EC2 instance
+
 ```bash
 ssh ec2-user@13.203.224.240
 # or use your EC2 key
@@ -20,12 +24,14 @@ ssh -i your-key.pem ec2-user@13.203.224.240
 ```
 
 ### Step 2: Check if the data files exist
+
 ```bash
 cd /var/www/QuantStrike/backend
 ls -la data/
 ```
 
 ### Step 3: Generate the instrument data files
+
 Run the management command to download and generate the expiry data:
 
 ```bash
@@ -34,11 +40,13 @@ python manage.py update_scrip_master
 ```
 
 This will:
+
 - Download the latest scrip master from Angel One API
 - Generate `data/instruments.json`
 - Generate `data/instruments_expiries.json` with valid expiry dates
 
 ### Step 4: Verify the files were created
+
 ```bash
 ls -la data/
 cat data/instruments_expiries.json | head -20
@@ -47,6 +55,7 @@ cat data/instruments_expiries.json | head -20
 You should see JSON data with expiry dates for NIFTY, BANKNIFTY, and SENSEX.
 
 ### Step 5: Restart the backend service
+
 ```bash
 sudo systemctl restart gunicorn
 # or
@@ -54,6 +63,7 @@ sudo systemctl restart quantstrike-backend
 ```
 
 ### Step 6: Test the instrument update
+
 Now try updating an instrument from the frontend. It should work.
 
 ## Alternative: Manual File Creation
@@ -89,6 +99,7 @@ I've already updated the code to handle missing expiry data more gracefully:
 **File:** `backend/api/serializers.py`
 
 The validation now:
+
 1. Only validates against allowed expiries if the expiry map is loaded and has entries
 2. Provides a better error message that shows which expiries are available
 3. Won't block updates when the expiry data files are temporarily unavailable
@@ -96,6 +107,7 @@ The validation now:
 ## Preventing Future Issues
 
 ### 1. Ensure the cron job is running
+
 The `update_scrip_master` command should run daily. Verify:
 
 ```bash
@@ -103,11 +115,13 @@ crontab -l | grep update_scrip_master
 ```
 
 You should see:
+
 ```
 0 5 * * * cd /var/www/QuantStrike/backend && /usr/bin/python3 manage.py update_scrip_master >> /var/log/scrip_master_update.log 2>&1
 ```
 
 ### 2. Check the cron logs
+
 ```bash
 tail -50 /var/log/scrip_master_update.log
 ```
@@ -123,6 +137,7 @@ python manage.py update_scrip_master || echo "⚠️  Warning: Could not update 
 ```
 
 ### 4. Set up monitoring
+
 Add a check to verify the files exist and are recent:
 
 ```bash
@@ -135,6 +150,7 @@ find /var/www/QuantStrike/backend/data -name "instruments_expiries.json" -mtime 
 To test the fix locally:
 
 1. **Simulate the problem:**
+
    ```bash
    cd backend
    rm -f data/instruments_expiries.json  # Remove the file
@@ -142,6 +158,7 @@ To test the fix locally:
    ```
 
 2. **Fix it:**
+
    ```bash
    python manage.py update_scrip_master
    ```
@@ -169,12 +186,15 @@ cd /var/www/QuantStrike
 ## Additional Commands
 
 ### Manually update instruments in database
+
 If you need to roll forward expired contracts:
+
 ```bash
 python manage.py update_instruments
 ```
 
 ### Check Django logs
+
 ```bash
 # If using gunicorn
 sudo journalctl -u gunicorn -n 100
@@ -201,6 +221,7 @@ tail -f /var/log/quantstrike_backend.log  # adjust path as needed
 ## Support
 
 If you continue to have issues:
+
 1. Check the Django error logs for detailed error messages
 2. Verify the Angel One API credentials are configured
 3. Ensure network access to Angel One API from EC2
