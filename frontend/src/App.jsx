@@ -12,6 +12,7 @@ import VerifyResetOtpPage from "./pages/VerifyResetOtpPage.jsx";
 import ResetPasswordPage from "./pages/ResetPasswordPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import StrategyBacktestPage from "./pages/StrategyBacktestPage.jsx";
+import LogsViewerPage from "./pages/LogsViewerPage.jsx";
 
 export default function App() {
   return (
@@ -28,6 +29,10 @@ export default function App() {
           element={<VerifyResetOtpPage />}
         />
         <Route path="/forgot-password/reset" element={<ResetPasswordPage />} />
+        
+        {/* Standalone log viewer - no layout, accessible via direct URL only */}
+        <Route path="/logs" element={<LogsViewerPage />} />
+        
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="instruments" element={<InstrumentsPage />} />

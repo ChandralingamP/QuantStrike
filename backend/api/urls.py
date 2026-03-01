@@ -19,6 +19,7 @@ from .views import (
     StrategyAlphaRunView,
     StrategyOneBacktestView,
 )
+from .views_logs import LogFilesListView, LogFileContentView
 
 router = DefaultRouter()
 router.register(r"strategies", StrategyViewSet, basename="strategy")
@@ -63,5 +64,7 @@ urlpatterns = [
         StrategyOneBacktestView.as_view(),
         name="strategy-one-backtest",
     ),
+    path("logs/files/", LogFilesListView.as_view(), name="log-files-list"),
+    path("logs/content/", LogFileContentView.as_view(), name="log-file-content"),
     path("", include(router.urls)),
 ]
