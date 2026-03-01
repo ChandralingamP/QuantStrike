@@ -205,4 +205,10 @@ class Command(BaseCommand):
                 )
                 result['status'] = 'error'
 
+        except Exception as e:
+            self.stdout.write(
+                self.style.ERROR(f"❌ {user.username}: Fatal error - {str(e)}")
+            )
+            result['status'] = 'error'
+
         return result
