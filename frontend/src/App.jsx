@@ -29,10 +29,10 @@ export default function App() {
           element={<VerifyResetOtpPage />}
         />
         <Route path="/forgot-password/reset" element={<ResetPasswordPage />} />
-        
+
         {/* Standalone log viewer - no layout, accessible via direct URL only */}
         <Route path="/logs" element={<LogsViewerPage />} />
-        
+
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="instruments" element={<InstrumentsPage />} />
