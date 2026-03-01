@@ -1,15 +1,52 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from contextlib import contextmanager
-from django.utils.dateparse import parse_date
+from datetime import datetime
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.test.utils import override_settings
+from django.utils.dateparse import parse_date
 
 from ...services.strategy_alpha import StrategyAlphaEngine
+
+
+def setup_user_logger(username: str) -> logging.Logger:
+    """Set up a dedicated logger for a user with file handler."""
+    logs_dir = Path(settings.BASE_DIR) / "logs" / "users"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_file = logs_dir / f"{username}_strategy.log"
+    
+    # Create logger
+    logger = logging.getLogger(f"strategy_alpha.{username}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    
+    # Clear existing handlers
+    logger.handlers.clear()
+    
+    # File handler
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Also log to console for immediate feedback
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    return logger
 
 
 @contextmanager
@@ -62,12 +99,33 @@ class Command(BaseCommand):
         user = self._get_user(username)
         execution_mode = mode_override if mode_override in {"demo", "live"} else None
 
+        # Set up user-specific logger
+        user_logger = setup_user_logger(username)
+        user_logger.info("=" * 80)
+        user_logger.info(f"STRATEGY ALPHA EXECUTION - {username}")
+        user_logger.info("=" * 80)
+        user_logger.info(f"Mode: {execution_mode or 'auto'}")
+        user_logger.info(f"Market Date: {market_date or 'today'}")
+        user_logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        user_logger.info("=" * 80)
+
         with maybe_override_sandbox(sandbox):
             summary = StrategyAlphaEngine(
                 user=user,
                 execution_mode=execution_mode,
                 market_date=market_date,
+                logger=user_logger,
             ).run()
+
+        user_logger.info("=" * 80)
+        user_logger.info("EXECUTION SUMMARY")
+        user_logger.info("=" * 80)
+        user_logger.info(f"Status: {summary.get('status')}")
+        user_logger.info(f"Mode: {summary.get('mode')}")
+        user_logger.info(f"Opened Trades: {summary.get('opened_trades', 0)}")
+        user_logger.info(f"Closed Trades: {summary.get('closed_trades', 0)}")
+        user_logger.info(f"Net P&L: {summary.get('net_pnl', 0)}")
+        user_logger.info("=" * 80)
 
         self.stdout.write(self.style.SUCCESS("Strategy Alpha run completed."))
         for key, value in summary.items():

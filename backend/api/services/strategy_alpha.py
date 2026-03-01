@@ -307,12 +307,20 @@ class StrategyAlphaEngine:
         execution_mode: Optional[str] = None,
         market_data_provider: Optional[BaseMarketDataProvider] = None,
         market_date: Optional[date] = None,
+        logger: Optional[logging.Logger] = None,
     ) -> None:
         self.user = user
         self._execution_mode = execution_mode
         self._market_data_provider = market_data_provider
         self.market_date = market_date
-        self.logger = logger.getChild(f"StrategyAlpha[{user.username}]")
+        
+        # Use provided logger or create default one
+        if logger:
+            self.logger = logger
+        else:
+            default_logger = logging.getLogger(__name__)
+            self.logger = default_logger.getChild(f"StrategyAlpha[{user.username}]")
+        
         self._profile: Optional[UserProfile] = None
         self.market_client: Optional[SmartAPIMarketClient] = None
         self._intraday_cache: Dict[str, list[Candle]] = {}
@@ -462,16 +470,24 @@ class StrategyAlphaEngine:
         order_executor: OrderExecutor,
     ) -> InstrumentSummary:
         summary = InstrumentSummary(instrument=instrument.instrument)
+        self.logger.info(f"═══ Processing {instrument.instrument} ═══")
+        self.logger.info(f"Active: {instrument.active}, Direction: {instrument.transaction}, Lots: {instrument.no_of_lots}")
+        
         try:
             snapshot = self._get_entry_snapshot(provider, instrument)
             summary.price = snapshot.price
+            self.logger.info(f"Market snapshot - Price: {snapshot.price}, Volume: {snapshot.volume}")
         except MarketDataError as exc:
             message = f"Market data unavailable: {exc}"
             summary.message = message
-            self.logger.warning("%s", message)
+            self.logger.error(f"❌ {message}")
             return summary
         contracts = self._contract_specs(instrument, snapshot, provider)
+        self.logger.info(f"Found {len(contracts)} contract(s) to process")
+        
         for contract in contracts:
+            self.logger.info(f"--- Contract: {contract.symbol} ({contract.option_type}, Strike: {contract.strike}) ---")
+            
             open_trade = (
                 Trade.objects.select_for_update()
                 .filter(
@@ -487,23 +503,31 @@ class StrategyAlphaEngine:
             )
             try:
                 if open_trade:
+                    self.logger.info(f"✓ Existing open trade found - ID: {open_trade.id}, Entry: {open_trade.entry_price}, Current: {snapshot.price}")
                     closed, pnl_delta, reason = self._maybe_close_trade(
                         open_trade,
                         snapshot.price,
                         instrument,
                         order_executor,
                     )
+                    if closed:
+                        self.logger.info(f"✓ Trade closed - Reason: {reason}, P&L: {pnl_delta}")
+                    else:
+                        self.logger.info(f"Trade remains open - Monitoring...")
                     summary.closed += closed
                     summary.pnl += pnl_delta
                     if reason:
                         summary.message = reason
                     trailing_updated = self._update_trailing_stop(open_trade, snapshot.price, instrument)
+                    if trailing_updated:
+                        self.logger.info(f"Trailing stop updated to: {open_trade.trailing_stop_price}")
                     open_trade.last_price = snapshot.price
                     update_fields = ["last_price", "updated_at"]
                     if trailing_updated:
                         update_fields.insert(1, "trailing_stop_price")
                     open_trade.save(update_fields=update_fields)
                 else:
+                    self.logger.info(f"No open trade - Checking entry conditions...")
                     opened, message = self._maybe_open_trade(
                         instrument,
                         contract,
@@ -512,11 +536,16 @@ class StrategyAlphaEngine:
                         order_executor,
                         provider,
                     )
+                    if opened:
+                        self.logger.info(f"✓ New trade opened - Entry: {snapshot.price}")
+                    else:
+                        self.logger.info(f"✗ Entry condition not met - {message}")
                     summary.opened += opened
                     if message:
                         summary.message = message
             except StrategySkip as exc:
                 summary.message = str(exc)
+                self.logger.warning(f"⏭️  Skipped: {exc}")
                 self.logger.info(
                     "Skipping contract %s for %s: %s",
                     contract.symbol or contract.label,
@@ -742,11 +771,14 @@ class StrategyAlphaEngine:
         direction = instrument.transaction or Instrument.Transaction.BUY
 
         if not instrument.active:
+            self.logger.info("✗ Instrument is inactive")
             return EntryPlan(False, message="instrument_inactive")
 
         if instrument.strike_selection != Instrument.StrikeSelection.ATM or direction != Instrument.Transaction.BUY:
             if not self._entry_condition_met(instrument, snapshot):
+                self.logger.info("✗ Entry condition not met (price/volume/gap check)")
                 return EntryPlan(False, message="conditions_not_met")
+            self.logger.info("✓ Entry condition met")
             return EntryPlan(True, entry_price=snapshot.price)
 
         if not self.market_client:
@@ -755,13 +787,18 @@ class StrategyAlphaEngine:
         market_day = self._current_market_day()
         prev_levels = self._ensure_previous_session_levels(instrument, contract, market_day)
         if not prev_levels:
+            self.logger.info("✗ Previous session levels not available")
             return EntryPlan(False, message="previous_levels_unavailable")
 
         reference_high, reference_low = prev_levels
+        self.logger.info(f"Previous levels - High: {reference_high}, Low: {reference_low}")
+        
         candles = self._get_intraday_candles(instrument, contract, market_day)
         if len(candles) < 2:
+            self.logger.info(f"✗ Not enough candles yet (have: {len(candles)}, need: 2+)")
             return EntryPlan(False, message="awaiting_candles", stop_loss=reference_low)
 
+        self.logger.info(f"Analyzing {len(candles)} candles for breakout...")
         now_local = timezone.localtime()
         current_high = reference_high
         current_low = reference_low
@@ -772,6 +809,7 @@ class StrategyAlphaEngine:
 
             is_first = index == 0
             if is_first and candle.open > current_high:
+                self.logger.info(f"✗ Gap up detected on first candle - Open: {candle.open} > High: {current_high}")
                 current_high = candle.high
                 current_low = candle.low
                 self._update_daily_levels(
@@ -787,9 +825,11 @@ class StrategyAlphaEngine:
 
             entry_time = next_candle.timestamp
             if entry_time > now_local:
+                self.logger.info(f"⏰ Breakout detected but waiting for next candle - Entry time: {entry_time}")
                 return EntryPlan(False, message="await_next_candle", stop_loss=current_low, entry_time=entry_time, reference_high=current_high, reference_low=current_low)
 
             entry_price = next_candle.open
+            self.logger.info(f"✓ BREAKOUT CONFIRMED - Entry: {entry_price}, SL: {current_low}")
             return EntryPlan(
                 True,
                 entry_price=entry_price,
@@ -799,6 +839,7 @@ class StrategyAlphaEngine:
                 reference_low=current_low,
             )
 
+        self.logger.info("✗ No breakout detected yet")
         return EntryPlan(False, message="no_breakout", stop_loss=current_low)
 
     def _ensure_previous_session_levels(
