@@ -30,9 +30,6 @@ export default function App() {
         />
         <Route path="/forgot-password/reset" element={<ResetPasswordPage />} />
 
-        {/* Standalone log viewer - no layout, accessible via direct URL only */}
-        <Route path="/logs" element={<LogsViewerPage />} />
-
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="instruments" element={<InstrumentsPage />} />
@@ -42,6 +39,9 @@ export default function App() {
           <Route path="admin/backtest" element={<StrategyBacktestPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
+
+        {/* Standalone log viewer - must be after Layout routes to avoid catch-all */}
+        <Route path="/logs" element={<LogsViewerPage />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { getAuthUsername } from "../utils/authCookies";
 import { API_BASE_URL } from "../utils/constants";
 
 export default function LogsViewerPage() {
+  const navigate = useNavigate();
   const [logFiles, setLogFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [logContent, setLogContent] = useState("");
@@ -9,20 +12,28 @@ export default function LogsViewerPage() {
   const [error, setError] = useState(null);
   const [lines, setLines] = useState(500);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [username, setUsername] = useState(() => getAuthUsername());
+
+  // Check authentication on mount
+  useEffect(() => {
+    const currentUser = getAuthUsername();
+    if (!currentUser) {
+      setError("Not authenticated. Please login first.");
+      return;
+    }
+    setUsername(currentUser);
+  }, []);
 
   // Fetch list of log files
   const fetchLogFiles = async () => {
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
+      if (!username) {
         setError("Not authenticated. Please login first.");
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/logs/files/`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const response = await fetch(`${API_BASE_URL}/logs/files/?username=${username}`, {
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -44,13 +55,15 @@ export default function LogsViewerPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem("token");
+      if (!username) {
+        setError("Not authenticated. Please login first.");
+        return;
+      }
+
       const response = await fetch(
-        `${API_BASE_URL}/logs/content/?filename=${filename}&lines=${lines}&tail=true`,
+        `${API_BASE_URL}/logs/content/?filename=${filename}&lines=${lines}&tail=true&username=${username}`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: "include",
         },
       );
 
@@ -75,8 +88,10 @@ export default function LogsViewerPage() {
 
   // Initial fetch
   useEffect(() => {
-    fetchLogFiles();
-  }, []);
+    if (username) {
+      fetchLogFiles();
+    }
+  }, [username]);
 
   // Auto-refresh
   useEffect(() => {

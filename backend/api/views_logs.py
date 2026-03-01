@@ -9,18 +9,29 @@ from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 
 class LogFilesListView(APIView):
     """
     API endpoint to list all available log files for a user.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """List all log files in the logs/users directory."""
         try:
+            # Get username from query params or cookie
+            username = request.query_params.get('username')
+            if not username:
+                # Try to get from cookie
+                username = request.COOKIES.get('qs_username')
+            
+            if not username:
+                return Response({
+                    'error': 'Unauthorized - please login first'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
             logs_dir = os.path.join(settings.BASE_DIR, 'logs', 'users')
             
             if not os.path.exists(logs_dir):
@@ -62,7 +73,7 @@ class LogFileContentView(APIView):
     """
     API endpoint to retrieve contents of a specific log file.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """
@@ -71,8 +82,19 @@ class LogFileContentView(APIView):
         - filename: Name of the log file
         - lines: Number of lines to retrieve (default: 500, max: 5000)
         - tail: If true, get last N lines; if false, get first N lines
+        - username: Username for authentication
         """
         try:
+            # Check authentication
+            username = request.query_params.get('username')
+            if not username:
+                username = request.COOKIES.get('qs_username')
+            
+            if not username:
+                return Response({
+                    'error': 'Unauthorized - please login first'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
             filename = request.query_params.get('filename')
             if not filename:
                 return Response({
