@@ -142,8 +142,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("🚀 STARTING TRADE MONITOR"))
             self.stdout.write("=" * 80)
             try:
+                import sys as _sys
                 subprocess.Popen(
-                    ["python3", "manage.py", "monitor_trades", username, "--interval", "15"],
+                    [_sys.executable, "manage.py", "monitor_trades", username, "--interval", "15"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )

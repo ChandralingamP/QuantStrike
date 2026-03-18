@@ -279,8 +279,8 @@ class SmartAPIMarketClient:
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    # Exponential backoff: 1s, 2s, 4s
-                    delay = 2 ** attempt
+                    # Exponential backoff: 2s, 4s, 8s
+                    delay = 2 ** (attempt + 1)
                     logger.info(f"⏳ Retry {attempt + 1}/{max_retries} after {delay}s delay...")
                     time.sleep(delay)
                 

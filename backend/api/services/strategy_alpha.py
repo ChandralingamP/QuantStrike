@@ -410,27 +410,43 @@ class StrategyAlphaEngine:
             "instrument_summaries": [],
         }
 
-        # Process instruments sequentially to stay below SmartAPI rate limits.
-        for instrument in instruments:
-            try:
-                instrument_summary = self._process_instrument(
-                    instrument=instrument,
-                    provider=provider,
-                    execution_mode=execution_mode,
-                    order_executor=order_executor,
-                )
-                summary["opened_trades"] += instrument_summary.opened
-                summary["closed_trades"] += instrument_summary.closed
-                summary["net_pnl"] += instrument_summary.pnl
-                summary["instrument_summaries"].append(instrument_summary.as_dict())
-            except Exception as exc:
-                self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
-                summary["instrument_summaries"].append({
-                    "instrument": instrument.instrument,
-                    "opened": 0,
-                    "closed": 0,
-                    "message": f"Error: {str(exc)}",
-                })
+        # Process instruments sequentially with delays to stay below SmartAPI rate limits.
+        import time as _time
+        for idx, instrument in enumerate(instruments):
+            if idx > 0:
+                # Pause between instruments to avoid rate-limit ("Too many requests")
+                _time.sleep(2)
+            for attempt in range(1, 4):
+                try:
+                    instrument_summary = self._process_instrument(
+                        instrument=instrument,
+                        provider=provider,
+                        execution_mode=execution_mode,
+                        order_executor=order_executor,
+                    )
+                    summary["opened_trades"] += instrument_summary.opened
+                    summary["closed_trades"] += instrument_summary.closed
+                    summary["net_pnl"] += instrument_summary.pnl
+                    summary["instrument_summaries"].append(instrument_summary.as_dict())
+                    break  # success
+                except Exception as exc:
+                    exc_msg = str(exc).lower()
+                    is_rate_limit = "too many" in exc_msg or "try after" in exc_msg
+                    if is_rate_limit and attempt < 3:
+                        wait = 3 * attempt
+                        self.logger.warning(
+                            f"Rate-limited on {instrument.instrument}, retry {attempt}/3 after {wait}s"
+                        )
+                        _time.sleep(wait)
+                        continue
+                    self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
+                    summary["instrument_summaries"].append({
+                        "instrument": instrument.instrument,
+                        "opened": 0,
+                        "closed": 0,
+                        "message": f"Error: {str(exc)}",
+                    })
+                    break
 
         summary["net_pnl"] = str(summary["net_pnl"])
         return summary
