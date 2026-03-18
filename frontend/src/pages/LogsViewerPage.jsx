@@ -32,9 +32,12 @@ export default function LogsViewerPage() {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/logs/files/?username=${username}`, {
-        credentials: "include",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/logs/files/?username=${username}`,
+        {
+          credentials: "include",
+        },
+      );
 
       if (!response.ok) {
         throw new Error("Failed to fetch log files");

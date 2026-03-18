@@ -225,10 +225,27 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
         if not self.profile.jwt_token or not self.profile.refresh_token:
             raise MarketDataError("SmartAPI tokens are unavailable; reconnect the brokerage account.")
         try:
-            client.renewAccessToken(
-                refreshToken=self.profile.refresh_token,
-                jwtToken=self.profile.jwt_token,
-            )
+            client.setAccessToken(self.profile.jwt_token)
+            if self.profile.refresh_token:
+                client.setRefreshToken(self.profile.refresh_token)
+            if getattr(self.profile, "feed_token", None):
+                try:
+                    client.setFeedToken(self.profile.feed_token)
+                except Exception:
+                    pass
+
+            # SDK compatibility: different smartapi-python versions expose
+            # different token refresh signatures.
+            try:
+                client.renewAccessToken(
+                    refreshToken=self.profile.refresh_token,
+                    jwtToken=self.profile.jwt_token,
+                )
+            except TypeError:
+                try:
+                    client.renewAccessToken()
+                except Exception:
+                    client.generateToken(self.profile.refresh_token)
         except Exception as exc:
             raise MarketDataError(f"Unable to refresh SmartAPI session: {exc}") from exc
         self._client = client

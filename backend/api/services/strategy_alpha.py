@@ -22,7 +22,7 @@ from ..models import (
     Trade,
 )
 from ..models import UserProfile
-from ..utils.contract_lookup import ContractLookupError, lookup_contract
+from ..utils.contract_lookup import ContractLookupError, find_contract, lookup_contract
 from ..utils.instrument_data import parse_expiry_code
 from .market_data import (
     BaseMarketDataProvider,
@@ -410,38 +410,27 @@ class StrategyAlphaEngine:
             "instrument_summaries": [],
         }
 
-        # Process all instruments in parallel for simultaneous execution
-        with ThreadPoolExecutor(max_workers=len(instruments)) as executor:
-            # Submit all instruments for parallel execution
-            future_to_instrument = {
-                executor.submit(
-                    self._process_instrument,
+        # Process instruments sequentially to stay below SmartAPI rate limits.
+        for instrument in instruments:
+            try:
+                instrument_summary = self._process_instrument(
                     instrument=instrument,
                     provider=provider,
                     execution_mode=execution_mode,
                     order_executor=order_executor,
-                ): instrument
-                for instrument in instruments
-            }
-
-            # Collect results as they complete
-            for future in as_completed(future_to_instrument):
-                instrument = future_to_instrument[future]
-                try:
-                    instrument_summary = future.result()
-                    summary["opened_trades"] += instrument_summary.opened
-                    summary["closed_trades"] += instrument_summary.closed
-                    summary["net_pnl"] += instrument_summary.pnl
-                    summary["instrument_summaries"].append(instrument_summary.as_dict())
-                except Exception as exc:
-                    self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
-                    # Add failed instrument to summary
-                    summary["instrument_summaries"].append({
-                        "instrument": instrument.instrument,
-                        "opened": 0,
-                        "closed": 0,
-                        "message": f"Error: {str(exc)}",
-                    })
+                )
+                summary["opened_trades"] += instrument_summary.opened
+                summary["closed_trades"] += instrument_summary.closed
+                summary["net_pnl"] += instrument_summary.pnl
+                summary["instrument_summaries"].append(instrument_summary.as_dict())
+            except Exception as exc:
+                self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
+                summary["instrument_summaries"].append({
+                    "instrument": instrument.instrument,
+                    "opened": 0,
+                    "closed": 0,
+                    "message": f"Error: {str(exc)}",
+                })
 
         summary["net_pnl"] = str(summary["net_pnl"])
         return summary
@@ -476,7 +465,8 @@ class StrategyAlphaEngine:
         try:
             snapshot = self._get_entry_snapshot(provider, instrument)
             summary.price = snapshot.price
-            self.logger.info(f"Market snapshot - Price: {snapshot.price}, Volume: {snapshot.volume}")
+            snapshot_volume = getattr(snapshot, "volume", None)
+            self.logger.info(f"Market snapshot - Price: {snapshot.price}, Volume: {snapshot_volume}")
         except MarketDataError as exc:
             message = f"Market data unavailable: {exc}"
             summary.message = message
@@ -487,62 +477,62 @@ class StrategyAlphaEngine:
         
         for contract in contracts:
             self.logger.info(f"--- Contract: {contract.symbol} ({contract.option_type}, Strike: {contract.strike}) ---")
-            
-            open_trade = (
-                Trade.objects.select_for_update()
-                .filter(
-                    user=self.user,
-                    instrument=instrument,
-                    strategy_code=self.STRATEGY_CODE,
-                    execution_mode=execution_mode,
-                    status=Trade.Status.OPEN,
-                    contract_symbol=contract.symbol,
-                )
-                .order_by("-entry_datetime")
-                .first()
-            )
             try:
-                if open_trade:
-                    self.logger.info(f"✓ Existing open trade found - ID: {open_trade.id}, Entry: {open_trade.entry_price}, Current: {snapshot.price}")
-                    closed, pnl_delta, reason = self._maybe_close_trade(
-                        open_trade,
-                        snapshot.price,
-                        instrument,
-                        order_executor,
+                with transaction.atomic():
+                    open_trade = (
+                        Trade.objects.select_for_update()
+                        .filter(
+                            user=self.user,
+                            instrument=instrument,
+                            strategy_code=self.STRATEGY_CODE,
+                            execution_mode=execution_mode,
+                            status=Trade.Status.OPEN,
+                            contract_symbol=contract.symbol,
+                        )
+                        .order_by("-entry_datetime")
+                        .first()
                     )
-                    if closed:
-                        self.logger.info(f"✓ Trade closed - Reason: {reason}, P&L: {pnl_delta}")
+                    if open_trade:
+                        self.logger.info(f"✓ Existing open trade found - ID: {open_trade.id}, Entry: {open_trade.entry_price}, Current: {snapshot.price}")
+                        closed, pnl_delta, reason = self._maybe_close_trade(
+                            open_trade,
+                            snapshot.price,
+                            instrument,
+                            order_executor,
+                        )
+                        if closed:
+                            self.logger.info(f"✓ Trade closed - Reason: {reason}, P&L: {pnl_delta}")
+                        else:
+                            self.logger.info("Trade remains open - Monitoring...")
+                        summary.closed += closed
+                        summary.pnl += pnl_delta
+                        if reason:
+                            summary.message = reason
+                        trailing_updated = self._update_trailing_stop(open_trade, snapshot.price, instrument)
+                        if trailing_updated:
+                            self.logger.info(f"Trailing stop updated to: {open_trade.trailing_stop_price}")
+                        open_trade.last_price = snapshot.price
+                        update_fields = ["last_price", "updated_at"]
+                        if trailing_updated:
+                            update_fields.insert(1, "trailing_stop_price")
+                        open_trade.save(update_fields=update_fields)
                     else:
-                        self.logger.info(f"Trade remains open - Monitoring...")
-                    summary.closed += closed
-                    summary.pnl += pnl_delta
-                    if reason:
-                        summary.message = reason
-                    trailing_updated = self._update_trailing_stop(open_trade, snapshot.price, instrument)
-                    if trailing_updated:
-                        self.logger.info(f"Trailing stop updated to: {open_trade.trailing_stop_price}")
-                    open_trade.last_price = snapshot.price
-                    update_fields = ["last_price", "updated_at"]
-                    if trailing_updated:
-                        update_fields.insert(1, "trailing_stop_price")
-                    open_trade.save(update_fields=update_fields)
-                else:
-                    self.logger.info(f"No open trade - Checking entry conditions...")
-                    opened, message = self._maybe_open_trade(
-                        instrument,
-                        contract,
-                        snapshot,
-                        execution_mode,
-                        order_executor,
-                        provider,
-                    )
-                    if opened:
-                        self.logger.info(f"✓ New trade opened - Entry: {snapshot.price}")
-                    else:
-                        self.logger.info(f"✗ Entry condition not met - {message}")
-                    summary.opened += opened
-                    if message:
-                        summary.message = message
+                        self.logger.info("No open trade - Checking entry conditions...")
+                        opened, message = self._maybe_open_trade(
+                            instrument,
+                            contract,
+                            snapshot,
+                            execution_mode,
+                            order_executor,
+                            provider,
+                        )
+                        if opened:
+                            self.logger.info(f"✓ New trade opened - Entry: {snapshot.price}")
+                        else:
+                            self.logger.info(f"✗ Entry condition not met - {message}")
+                        summary.opened += opened
+                        if message:
+                            summary.message = message
             except StrategySkip as exc:
                 summary.message = str(exc)
                 self.logger.warning(f"⏭️  Skipped: {exc}")
@@ -615,6 +605,13 @@ class StrategyAlphaEngine:
             raise StrategySkip("Contract expiry not configured for instrument.")
         underlying = snapshot.underlying_price or provider.get_underlying_price(instrument)
         if underlying is None:
+            fallback_specs = self._fallback_current_contract_specs(instrument)
+            if fallback_specs:
+                self.logger.warning(
+                    "Underlying price unavailable for %s; falling back to current configured contracts.",
+                    instrument.instrument,
+                )
+                return fallback_specs
             raise StrategySkip("Unable to determine underlying price for dynamic strike selection.")
         step = max(instrument.strike_step or 0, 1)
         base_strike = self._round_to_step(_as_decimal(underlying), step)
@@ -661,18 +658,47 @@ class StrategyAlphaEngine:
         strike_component = f"{strike:05d}"
         symbol = f"{instrument.instrument}{expiry_code}{strike_component}{option_type.upper()}"
         try:
-            metadata = lookup_contract(symbol)
+            metadata = find_contract(
+                underlying=instrument.instrument,
+                expiry_code=expiry_code,
+                strike=strike,
+                option_type=option_type.upper(),
+            ) or lookup_contract(symbol)
         except ContractLookupError as exc:
             self.logger.debug("Contract metadata unavailable for %s: %s", symbol, exc)
             metadata = None
         token = metadata.token if metadata else ""
         return ContractSpec(
-            symbol=symbol,
+            symbol=metadata.symbol if metadata else symbol,
             token=token,
             option_type=option_type.upper(),
             strike=strike,
             label=label,
         )
+
+    def _fallback_current_contract_specs(self, instrument: Instrument) -> list[ContractSpec]:
+        specs: list[ContractSpec] = []
+        if instrument.trading_symbol:
+            specs.append(
+                ContractSpec(
+                    symbol=instrument.trading_symbol,
+                    token=instrument.symbol_token or "",
+                    option_type=self._infer_option_type(instrument.trading_symbol),
+                    strike=self._extract_strike(instrument.trading_symbol),
+                    label="primary",
+                )
+            )
+        if instrument.alternate_trading_symbol:
+            specs.append(
+                ContractSpec(
+                    symbol=instrument.alternate_trading_symbol,
+                    token=instrument.alternate_symbol_token or "",
+                    option_type=self._infer_option_type(instrument.alternate_trading_symbol),
+                    strike=self._extract_strike(instrument.alternate_trading_symbol),
+                    label="alternate",
+                )
+            )
+        return [spec for spec in specs if spec.symbol and spec.token]
 
     def _resolve_expiry_code(self, instrument: Instrument) -> str:
         if instrument.contract_expiry:
@@ -712,7 +738,7 @@ class StrategyAlphaEngine:
                     label="alternate",
                 )
             )
-        return [spec for spec in specs if spec.symbol]
+        return [spec for spec in specs if spec.symbol and spec.token]
 
     def _contract_spec_from_cache(self, *, symbol: str, token: str, label: str) -> ContractSpec:
         option_type = self._infer_option_type(symbol)

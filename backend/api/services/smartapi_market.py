@@ -292,6 +292,18 @@ class SmartAPIMarketClient:
                 response.raise_for_status()
                 result = response.json()
                 print(f"📥 Response: {result}")
+
+                if isinstance(result, dict) and not result.get("status"):
+                    error_code = str(result.get("errorcode") or "").strip().upper()
+                    if error_code in {"AB1019", "AB1004"} and attempt < max_retries - 1:
+                        logger.warning(
+                            "⚠️  SmartAPI returned %s, retrying... Attempt %s/%s",
+                            error_code,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        continue
+
                 return result
             except requests.HTTPError as exc:
                 if exc.response.status_code == 403 and attempt < max_retries - 1:

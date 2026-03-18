@@ -3,6 +3,7 @@ Management command to run strategies for all active users automatically.
 Designed for cron/scheduled execution.
 """
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from django.core.management.base import BaseCommand
@@ -153,7 +154,7 @@ class Command(BaseCommand):
                         return result
 
                 # Run strategy
-                cmd = ["python3", "manage.py", "run_strategy_alpha", user.username]
+                cmd = [sys.executable, "manage.py", "run_strategy_alpha", user.username]
                 if mode_override:
                     cmd.extend(["--mode", mode_override])
 
@@ -187,12 +188,17 @@ class Command(BaseCommand):
                             if "opened_trades" in line or "closed_trades" in line or "net_pnl" in line:
                                 self.stdout.write(f"   {line.strip()}")
                 else:
+                    error_excerpt = (subprocess_result.stderr or subprocess_result.stdout or "").strip()
+                    if error_excerpt:
+                        error_excerpt = error_excerpt.split("\n")[0][:300]
                     self.stdout.write(
-                        self.style.WARNING(
-                            f"⏭️  {user.username}: Strategy skipped or no conditions met"
+                        self.style.ERROR(
+                            f"❌ {user.username}: Strategy execution failed"
                         )
                     )
-                    result['status'] = 'skip'
+                    if error_excerpt:
+                        self.stdout.write(self.style.ERROR(f"   ↳ {error_excerpt}"))
+                    result['status'] = 'error'
 
             except subprocess.TimeoutExpired:
                 self.stdout.write(
