@@ -105,6 +105,10 @@ jobs:
 
             echo "🎨 Deploying frontend..."
             cd /var/www/QuantStrike/frontend
+
+            DEPLOY_USER="$(whoami)"
+            sudo chown -R "$DEPLOY_USER":"$DEPLOY_USER" /var/www/QuantStrike/frontend
+
             npm ci
             npm run build
 
