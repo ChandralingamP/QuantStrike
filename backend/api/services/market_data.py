@@ -277,8 +277,15 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
             return self._fallback_price(instrument)
 
     def get_entry_snapshot(self, instrument: Instrument) -> EntrySnapshot:
-        price = self.get_price(instrument)
         underlying = self.get_underlying_price(instrument)
+        # ATM instruments have no fixed option symbol_token; use underlying price
+        if not instrument.symbol_token:
+            if underlying is None:
+                raise MarketDataError(
+                    f"Instrument {instrument.instrument} has no symbol token and underlying price unavailable."
+                )
+            return EntrySnapshot(price=underlying, previous_low=None, underlying_price=underlying)
+        price = self.get_price(instrument)
         return EntrySnapshot(price=price, previous_low=None, underlying_price=underlying)
 
     def get_underlying_price(self, instrument: Instrument) -> Optional[Decimal]:

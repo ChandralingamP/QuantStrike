@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time as _time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.test.utils import override_settings
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from ...services.strategy_alpha import StrategyAlphaEngine
@@ -81,11 +83,26 @@ class Command(BaseCommand):
             default="",
             help="Run the strategy against a historical date (YYYY-MM-DD).",
         )
+        parser.add_argument(
+            "--scan-entries",
+            dest="scan_entries",
+            action="store_true",
+            help="Re-run strategy every 5 minutes until trades open or market closes (for breakout strategies).",
+        )
+        parser.add_argument(
+            "--scan-interval",
+            dest="scan_interval",
+            type=int,
+            default=300,
+            help="Seconds between entry scans (default: 300 = 5 minutes).",
+        )
 
     def handle(self, *args, **options):
         username = options["username"].strip()
         mode_override = (options.get("mode") or "").strip().lower()
         sandbox = bool(options.get("sandbox"))
+        scan_entries = bool(options.get("scan_entries"))
+        scan_interval = options.get("scan_interval") or 300
         market_date_raw = options.get("market_date") or ""
         market_date = None
         if market_date_raw:
@@ -136,24 +153,20 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f"{key}: {value}")
 
+        opened = summary.get("opened_trades", 0)
+
         # Auto-start monitor if trades were opened
-        if summary.get("opened_trades", 0) > 0:
-            self.stdout.write("\n" + "=" * 80)
-            self.stdout.write(self.style.SUCCESS("🚀 STARTING TRADE MONITOR"))
-            self.stdout.write("=" * 80)
-            try:
-                import sys as _sys
-                subprocess.Popen(
-                    [_sys.executable, "manage.py", "monitor_trades", username, "--interval", "15"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                self.stdout.write(self.style.SUCCESS("✅ Monitor started in background"))
-                self.stdout.write("Monitor will run until all trades are closed.")
-            except Exception as e:
-                self.stdout.write(self.style.WARNING(f"⚠️  Could not auto-start monitor: {e}"))
-                self.stdout.write(f"Please manually run: python manage.py monitor_trades {username}")
-            self.stdout.write("=" * 80 + "\n")
+        if opened > 0:
+            self._start_monitor(username, user_logger)
+        # Auto-start entry scanner if breakout instruments are pending
+        elif not market_date and not scan_entries and self._needs_entry_scan(summary):
+            self._start_entry_scanner(username, mode_override, user_logger)
+
+        # Entry scanning loop (when --scan-entries is active)
+        if scan_entries and not market_date:
+            self._run_entry_scan_loop(
+                user, username, execution_mode, sandbox, scan_interval, user_logger,
+            )
 
     def _get_user(self, username):
         User = get_user_model()
@@ -161,3 +174,119 @@ class Command(BaseCommand):
             return User.objects.get(username__iexact=username)
         except User.DoesNotExist as exc:
             raise CommandError(f"User '{username}' not found.") from exc
+
+    # ------------------------------------------------------------------
+    # Entry scanning helpers
+    # ------------------------------------------------------------------
+
+    _PENDING_MESSAGES = frozenset({
+        "awaiting_candles",
+        "no_breakout",
+        "await_next_candle",
+        "previous_levels_unavailable",
+    })
+
+    def _needs_entry_scan(self, summary: dict) -> bool:
+        """Return True if any instrument is waiting for a breakout entry."""
+        for inst_summary in summary.get("instrument_summaries", []):
+            msg = inst_summary.get("message", "")
+            if msg in self._PENDING_MESSAGES:
+                return True
+        return False
+
+    @staticmethod
+    def _market_is_open() -> bool:
+        """Return True if current IST time is within 09:16 – 15:25."""
+        now = timezone.localtime()
+        return time(9, 16) <= now.time() <= time(15, 25)
+
+    def _start_monitor(self, username: str, logger: logging.Logger) -> None:
+        self.stdout.write("\n" + "=" * 80)
+        self.stdout.write(self.style.SUCCESS("🚀 STARTING TRADE MONITOR"))
+        self.stdout.write("=" * 80)
+        try:
+            import sys as _sys
+            subprocess.Popen(
+                [_sys.executable, "manage.py", "monitor_trades", username, "--interval", "15"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.stdout.write(self.style.SUCCESS("✅ Monitor started in background"))
+            logger.info("Monitor started in background")
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not auto-start monitor: {e}"))
+            self.stdout.write(f"Please manually run: python manage.py monitor_trades {username}")
+        self.stdout.write("=" * 80 + "\n")
+
+    def _start_entry_scanner(self, username: str, mode_override: str, logger: logging.Logger) -> None:
+        """Spawn a background process that re-runs the strategy every 5 min."""
+        self.stdout.write("\n" + "=" * 80)
+        self.stdout.write(self.style.SUCCESS("🔄 STARTING ENTRY SCANNER"))
+        self.stdout.write("=" * 80)
+        try:
+            import sys as _sys
+            cmd = [_sys.executable, "manage.py", "run_strategy_alpha", username, "--scan-entries"]
+            if mode_override:
+                cmd.extend(["--mode", mode_override])
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.stdout.write(self.style.SUCCESS("✅ Entry scanner started in background"))
+            self.stdout.write("Scanner will re-check every 5 minutes until trades open or market closes.")
+            logger.info("Entry scanner started in background (--scan-entries)")
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not auto-start entry scanner: {e}"))
+        self.stdout.write("=" * 80 + "\n")
+
+    def _run_entry_scan_loop(
+        self,
+        user,
+        username: str,
+        execution_mode: str | None,
+        sandbox: bool,
+        interval: int,
+        logger: logging.Logger,
+    ) -> None:
+        """Re-run strategy every `interval` seconds until trades open or market closes."""
+        scan_number = 0
+        logger.info("=" * 80)
+        logger.info("ENTRY SCANNER ACTIVE — checking every %d seconds", interval)
+        logger.info("=" * 80)
+
+        while self._market_is_open():
+            _time.sleep(interval)
+            scan_number += 1
+
+            if not self._market_is_open():
+                break
+
+            logger.info("─" * 60)
+            logger.info("Entry scan #%d at %s", scan_number, datetime.now().strftime("%H:%M:%S"))
+            logger.info("─" * 60)
+
+            try:
+                with maybe_override_sandbox(sandbox):
+                    summary = StrategyAlphaEngine(
+                        user=user,
+                        execution_mode=execution_mode,
+                        logger=logger,
+                    ).run()
+
+                opened = summary.get("opened_trades", 0)
+                logger.info("Scan #%d result — opened: %d", scan_number, opened)
+
+                if opened > 0:
+                    logger.info("✓ Trades opened — stopping entry scanner, starting monitor")
+                    self._start_monitor(username, logger)
+                    return
+
+                if not self._needs_entry_scan(summary):
+                    logger.info("No instruments awaiting breakout — stopping entry scanner")
+                    return
+
+            except Exception as exc:
+                logger.warning("Entry scan #%d failed: %s", scan_number, exc)
+
+        logger.info("Market closed — entry scanner stopped after %d scans", scan_number)
