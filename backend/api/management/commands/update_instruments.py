@@ -28,7 +28,18 @@ def _extract_symbol_details(symbol: str) -> tuple[int | None, str]:
 
 
 def _sync_contract_metadata(instrument: Instrument) -> list[str]:
+    """Refresh trading_symbol / token from the scrip master for STATIC mode only.
+
+    ATM instruments derive their contracts dynamically at strategy runtime so
+    the stored trading_symbol is just a stale placeholder — syncing it with the
+    old strike at a new expiry produces wrong data.  Skip those entirely and
+    let the strategy engine resolve fresh ATM contracts each morning.
+    """
     if not instrument.contract_expiry_code:
+        return []
+
+    # Never touch trading_symbol for ATM instruments — they are resolved live.
+    if instrument.strike_selection == Instrument.StrikeSelection.ATM:
         return []
 
     update_fields: list[str] = []
@@ -126,7 +137,15 @@ class Command(BaseCommand):
                 instrument.contract_expiry = next_date
                 update_fields.extend(["contract_expiry", "contract_expiry_code"])
 
-                # Clear cached daily selections and levels when expiry rolls.
+            # Always clear stale daily caches so ATM selection starts fresh
+            # each trading day.  The cache is only valid for the day it was
+            # created; leftover values from previous sessions cause the
+            # strategy to reuse wrong contracts.
+            stale_daily = (
+                instrument.daily_selection_date is not None
+                and instrument.daily_selection_date != today
+            )
+            if expiry_changed or stale_daily:
                 instrument.daily_selection_date = None
                 instrument.daily_ce_symbol = ""
                 instrument.daily_ce_token = ""
