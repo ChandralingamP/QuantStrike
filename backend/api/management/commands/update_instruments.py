@@ -125,10 +125,14 @@ class Command(BaseCommand):
             current_date = instrument.contract_expiry
             current_code = instrument.contract_expiry_code
 
-            expiry_changed = not (
-                current_code == next_code
-                and current_date is not None
-                and current_date >= today
+            # Do NOT roll the expiry if the current expiry is today —
+            # contracts are still tradeable on expiry day until market close.
+            # Only roll once the expiry date is strictly in the past.
+            current_still_valid = (
+                current_date is not None and current_date >= today
+            )
+            expiry_changed = not current_still_valid and (
+                next_code != current_code or current_date is None
             )
 
             update_fields = []
