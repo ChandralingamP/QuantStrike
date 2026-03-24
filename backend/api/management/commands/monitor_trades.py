@@ -120,16 +120,17 @@ class Command(BaseCommand):
 
                 self.stdout.write(f"📊 Monitoring {open_trades.count()} open trades...")
 
-                # Fetch current prices - build exchange_tokens dict
-                exchange_tokens = {"NFO": []}
-                token_trade_map = {}
+                # Fetch current prices - build exchange_tokens dict grouped by exchange
+                exchange_tokens: Dict[str, List[str]] = {}
+                token_trade_map: Dict[str, tuple] = {}  # token -> (exchange, trade)
                 
                 for trade in open_trades:
                     if trade.contract_token:
-                        exchange_tokens["NFO"].append(trade.contract_token)
-                        token_trade_map[trade.contract_token] = trade
+                        exchange = trade.instrument.exchange or "NFO"
+                        exchange_tokens.setdefault(exchange, []).append(trade.contract_token)
+                        token_trade_map[trade.contract_token] = (exchange, trade)
 
-                if not exchange_tokens["NFO"]:
+                if not token_trade_map:
                     self.stdout.write(self.style.WARNING("⚠️  No contract tokens found"))
                     time.sleep(interval)
                     continue
@@ -144,8 +145,8 @@ class Command(BaseCommand):
                 
                 # Check each trade for SL/TP/EOD
                 exits_performed = 0
-                for token, trade in token_trade_map.items():
-                    ltp_key = f"NFO:{token}"
+                for token, (exchange, trade) in token_trade_map.items():
+                    ltp_key = f"{exchange}:{token}"
                     current_price = ltp_data.get(ltp_key)
                     
                     if not current_price:
