@@ -1072,11 +1072,20 @@ class StrategyAlphaEngine:
             trailing_price = _quantize(price + trailing_points) if trailing_points else stop_price
         else:
             target_price = _quantize(price + pl_points) if pl_points else None
+            # Use breakout reference low as SL, but cap at sl_points from entry
             stop_anchor = plan_stop if plan_stop is not None else snapshot.previous_low
+            max_sl_price = _quantize(price - sl_points) if sl_points else None
             if stop_anchor is not None:
                 stop_price = _quantize(stop_anchor)
+                # Never let SL be wider than sl_points from entry
+                if max_sl_price is not None and stop_price < max_sl_price:
+                    self.logger.info(
+                        "SL capped: reference_low %s too far, using sl_points limit %s",
+                        stop_price, max_sl_price,
+                    )
+                    stop_price = max_sl_price
             else:
-                stop_price = _quantize(price - sl_points) if sl_points else None
+                stop_price = max_sl_price
             trailing_price = _quantize(price - trailing_points) if trailing_points else stop_price
 
         order_result = order_executor.place_entry_order(
