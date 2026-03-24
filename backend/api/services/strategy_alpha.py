@@ -509,10 +509,13 @@ class StrategyAlphaEngine:
                         .first()
                     )
                     if open_trade:
-                        self.logger.info(f"✓ Existing open trade found - ID: {open_trade.id}, Entry: {open_trade.entry_price}, Current: {snapshot.price}")
+                        # For ATM instruments, snapshot.price is the underlying index.
+                        # We need the option's LTP for trade monitoring.
+                        monitor_price = self._get_option_ltp(instrument, contract) or snapshot.price
+                        self.logger.info(f"✓ Existing open trade found - ID: {open_trade.id}, Entry: {open_trade.entry_price}, Current: {monitor_price}")
                         closed, pnl_delta, reason = self._maybe_close_trade(
                             open_trade,
-                            snapshot.price,
+                            monitor_price,
                             instrument,
                             order_executor,
                         )
@@ -524,10 +527,10 @@ class StrategyAlphaEngine:
                         summary.pnl += pnl_delta
                         if reason:
                             summary.message = reason
-                        trailing_updated = self._update_trailing_stop(open_trade, snapshot.price, instrument)
+                        trailing_updated = self._update_trailing_stop(open_trade, monitor_price, instrument)
                         if trailing_updated:
                             self.logger.info(f"Trailing stop updated to: {open_trade.trailing_stop_price}")
-                        open_trade.last_price = snapshot.price
+                        open_trade.last_price = monitor_price
                         update_fields = ["last_price", "updated_at"]
                         if trailing_updated:
                             update_fields.insert(1, "trailing_stop_price")
@@ -1016,6 +1019,21 @@ class StrategyAlphaEngine:
                 return snapshot
         price = provider.get_price(instrument)
         return EntrySnapshot(price=price)
+
+    def _get_option_ltp(self, instrument: Instrument, contract: ContractSpec) -> Optional[Decimal]:
+        """Fetch the live option LTP for a specific contract via SmartAPI."""
+        if not self.market_client or not contract.token:
+            return None
+        try:
+            exchange = instrument.exchange or "NFO"
+            ltp_map = self.market_client.get_ltp_batch(
+                exchange_tokens={exchange: [contract.token]},
+            )
+            key = f"{exchange}:{contract.token}"
+            return ltp_map.get(key)
+        except Exception as exc:
+            self.logger.debug("Option LTP fetch failed for %s: %s", contract.symbol, exc)
+            return None
 
     def _maybe_open_trade(
         self,

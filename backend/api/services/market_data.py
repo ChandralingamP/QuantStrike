@@ -291,10 +291,11 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
     def get_underlying_price(self, instrument: Instrument) -> Optional[Decimal]:
         try:
             client = self._ensure_client()
+            exchange, token = self._resolve_index_exchange_token(instrument)
             response = client.ltpData(  # type: ignore[attr-defined]
-                exchange="NSE",
+                exchange=exchange,
                 tradingsymbol=instrument.instrument,
-                symboltoken=self._resolve_index_token(instrument),
+                symboltoken=token,
             )
             ltp = response.get("data", {}).get("ltp") if isinstance(response, dict) else None
             if ltp is None:
@@ -306,16 +307,16 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
                 return self.fallback.get_underlying_price(instrument)
             return None
 
-    def _resolve_index_token(self, instrument: Instrument) -> str:
+    def _resolve_index_exchange_token(self, instrument: Instrument) -> tuple[str, str]:
         mapping = {
-            Instrument.InstrumentCode.NIFTY: "99926000",
-            Instrument.InstrumentCode.BANKNIFTY: "99926009",
-            Instrument.InstrumentCode.SENSEX: "99919000",
+            Instrument.InstrumentCode.NIFTY: ("NSE", "99926000"),
+            Instrument.InstrumentCode.BANKNIFTY: ("NSE", "99926009"),
+            Instrument.InstrumentCode.SENSEX: ("BSE", "99919000"),
         }
-        token = mapping.get(instrument.instrument)
-        if not token:
+        result = mapping.get(instrument.instrument)
+        if not result:
             raise MarketDataError(f"No index token configured for {instrument.instrument}.")
-        return token
+        return result
 
 
 class HistoricalDataUnavailable(MarketDataError):
