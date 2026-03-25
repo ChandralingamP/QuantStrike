@@ -50,7 +50,6 @@ from .serializers import (
 from .services.instruments import initialize_user_instruments
 from .services.market_data import MarketDataError
 from .services.strategy_alpha import StrategyAlphaEngine
-from .services.strategy_one import OpeningRangeBreakoutEngine
 from .utils.instrument_data import load_expiry_map
 from .utils.trade_costs import (
     calculate_margin_required,
@@ -395,9 +394,9 @@ class StrategyAlphaRunView(APIView):
 class StrategyOneBacktestView(APIView):
     """Admin-only backtest endpoint for Strategy Alpha.
 
-    This wraps OpeningRangeBreakoutEngine and supports a single market_date or
-    a [start_date, end_date] range for backtesting. Trades are logged to the
-    usual Trade table and will appear in PnL views.
+    Uses StrategyAlphaEngine.run_backtest() to detect breakout entries and
+    simulate SL/TP/trailing/EOD exits by walking through historical candles.
+    Supports a single market_date or a [start_date, end_date] range.
     """
 
     authentication_classes = []
@@ -494,7 +493,7 @@ class StrategyOneBacktestView(APIView):
 
         runs = []
         for market_date in dates:
-            engine = OpeningRangeBreakoutEngine(
+            engine = StrategyAlphaEngine(
                 user=target_user,
                 execution_mode=mode,
                 market_date=market_date,
@@ -502,7 +501,7 @@ class StrategyOneBacktestView(APIView):
                 instrument_ids=instrument_ids,
             )
             try:
-                summary = engine.run()
+                summary = engine.run_backtest()
             except MarketDataError as exc:
                 summary = {
                     "status": "skipped",

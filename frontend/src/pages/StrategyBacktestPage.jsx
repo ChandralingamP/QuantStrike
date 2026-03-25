@@ -71,6 +71,7 @@ export default function StrategyBacktestPage() {
 
       const payload = {
         username: username.trim(),
+        api_username: getAuthUsername(),
         mode,
         strategy_code: selectedStrategy,
       };
@@ -315,9 +316,28 @@ export default function StrategyBacktestPage() {
                   Status: {run.summary?.status}
                   {typeof run.summary?.opened_trades === "number" && (
                     <>
-                      {" · Opened trades: "}
+                      {" · Opened: "}
                       {run.summary.opened_trades}
+                      {" · Closed: "}
+                      {run.summary.closed_trades ?? 0}
                     </>
+                  )}
+                  {run.summary?.net_pnl && (
+                    <span
+                      className={`ml-2 font-semibold ${
+                        parseFloat(run.summary.net_pnl) > 0
+                          ? "text-emerald-400"
+                          : parseFloat(run.summary.net_pnl) < 0
+                          ? "text-rose-400"
+                          : "text-slate-300"
+                      }`}
+                    >
+                      Net P&L: ₹
+                      {parseFloat(run.summary.net_pnl).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
                   )}
                 </div>
                 {Array.isArray(run.summary?.instrument_summaries) && (
@@ -328,7 +348,7 @@ export default function StrategyBacktestPage() {
                           <th className="px-3 py-2">Instrument</th>
                           <th className="px-3 py-2">Opened</th>
                           <th className="px-3 py-2">Closed</th>
-                          <th className="px-3 py-2">Price</th>
+                          <th className="px-3 py-2">P&L</th>
                           <th className="px-3 py-2">Message</th>
                         </tr>
                       </thead>
@@ -340,8 +360,19 @@ export default function StrategyBacktestPage() {
                             </td>
                             <td className="px-3 py-2">{instrument.opened}</td>
                             <td className="px-3 py-2">{instrument.closed}</td>
-                            <td className="px-3 py-2">
-                              {instrument.price ?? "—"}
+                            <td className={`px-3 py-2 font-medium ${
+                              instrument.pnl && parseFloat(instrument.pnl) > 0
+                                ? "text-emerald-400"
+                                : instrument.pnl && parseFloat(instrument.pnl) < 0
+                                ? "text-rose-400"
+                                : "text-slate-300"
+                            }`}>
+                              {instrument.pnl
+                                ? `₹${parseFloat(instrument.pnl).toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}`
+                                : "—"}
                             </td>
                             <td className="px-3 py-2 text-slate-300">
                               {instrument.message || ""}
@@ -352,6 +383,85 @@ export default function StrategyBacktestPage() {
                     </table>
                   </div>
                 )}
+                {Array.isArray(run.summary?.trades) &&
+                  run.summary.trades.length > 0 && (
+                    <div className="mt-3 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/40">
+                      <div className="border-b border-slate-800 bg-slate-900/60 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Trade Details
+                      </div>
+                      <table className="min-w-full divide-y divide-slate-800 text-left text-xs text-slate-200">
+                        <thead className="bg-slate-900/80 text-[11px] uppercase tracking-wide text-slate-400">
+                          <tr>
+                            <th className="px-3 py-2">Contract</th>
+                            <th className="px-3 py-2">Type</th>
+                            <th className="px-3 py-2">Entry</th>
+                            <th className="px-3 py-2">Exit</th>
+                            <th className="px-3 py-2">SL</th>
+                            <th className="px-3 py-2">Target</th>
+                            <th className="px-3 py-2">Reason</th>
+                            <th className="px-3 py-2">P&L</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                          {run.summary.trades.map((trade, tradeIdx) => (
+                            <tr key={trade.trade_id || tradeIdx}>
+                              <td className="px-3 py-2 font-medium text-white">
+                                {trade.contract || trade.instrument}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                                    trade.option_type === "CE"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : "bg-rose-500/20 text-rose-300"
+                                  }`}
+                                >
+                                  {trade.option_type}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">₹{trade.entry_price}</td>
+                              <td className="px-3 py-2">₹{trade.exit_price}</td>
+                              <td className="px-3 py-2 text-slate-400">
+                                {trade.stop_loss ? `₹${trade.stop_loss}` : "—"}
+                              </td>
+                              <td className="px-3 py-2 text-slate-400">
+                                {trade.target ? `₹${trade.target}` : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                                    trade.exit_reason === "target"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : trade.exit_reason === "stop_loss"
+                                      ? "bg-rose-500/20 text-rose-300"
+                                      : trade.exit_reason === "trailing_stop"
+                                      ? "bg-amber-500/20 text-amber-300"
+                                      : "bg-slate-500/20 text-slate-300"
+                                  }`}
+                                >
+                                  {(trade.exit_reason || "").replace("_", " ")}
+                                </span>
+                              </td>
+                              <td
+                                className={`px-3 py-2 font-medium ${
+                                  parseFloat(trade.pnl) > 0
+                                    ? "text-emerald-400"
+                                    : parseFloat(trade.pnl) < 0
+                                    ? "text-rose-400"
+                                    : "text-slate-300"
+                                }`}
+                              >
+                                ₹{parseFloat(trade.pnl).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
               </div>
             ))}
           </div>

@@ -308,11 +308,15 @@ class StrategyAlphaEngine:
         market_data_provider: Optional[BaseMarketDataProvider] = None,
         market_date: Optional[date] = None,
         logger: Optional[logging.Logger] = None,
+        ignore_activation: bool = False,
+        instrument_ids: Optional[list[int]] = None,
     ) -> None:
         self.user = user
         self._execution_mode = execution_mode
         self._market_data_provider = market_data_provider
         self.market_date = market_date
+        self.ignore_activation = ignore_activation
+        self.instrument_ids = instrument_ids or []
         
         # Use provided logger or create default one
         if logger:
@@ -364,6 +368,380 @@ class StrategyAlphaEngine:
 
         run_log.mark_completed(extra=summary)
         return summary
+
+    def run_backtest(self) -> Dict[str, object]:
+        """Run strategy and simulate trade monitoring using historical candles.
+
+        Unlike ``run()`` which only opens trades (monitor closes them),
+        this method walks through all remaining candles after entry to
+        simulate SL / target / trailing / EOD exits in a single pass.
+        """
+        algo_config, _ = AlgoConfiguration.objects.get_or_create(user=self.user)
+        activation, _ = StrategyActivation.objects.get_or_create(
+            user=self.user,
+            strategy_code=self.STRATEGY_CODE,
+        )
+
+        execution_mode = self._execution_mode or activation.execution_mode
+
+        try:
+            summary = self._execute_backtest(algo_config, activation, execution_mode)
+        except StrategySkip as exc:
+            return {
+                "status": "skipped",
+                "mode": execution_mode,
+                "message": str(exc),
+            }
+        except Exception as exc:
+            self.logger.exception("Backtest run failed: %s", exc)
+            raise
+
+        return summary
+
+    def _execute_backtest(
+        self,
+        config: AlgoConfiguration,
+        activation: StrategyActivation,
+        execution_mode: str,
+    ) -> Dict[str, object]:
+        """Backtest variant of _execute that simulates full trade lifecycle."""
+        if not config.algo_active and not self.ignore_activation:
+            raise StrategySkip("Algo is currently disabled.")
+        if not activation.is_active and not self.ignore_activation:
+            raise StrategySkip("Strategy Alpha is not active for this user.")
+
+        instruments = list(
+            activation.selected_instruments.filter(active=True).order_by("instrument")
+        )
+        if self.instrument_ids:
+            instruments = [i for i in instruments if i.id in self.instrument_ids]
+        if not instruments:
+            raise StrategySkip("No active instruments assigned to Strategy Alpha.")
+
+        profile = self._resolve_profile()
+        self._profile = profile
+        self.market_client = self._build_market_client(profile)
+
+        provider = self._market_data_provider or build_market_data_provider(
+            profile=profile,
+            execution_mode=execution_mode,
+            seed=int(timezone.now().timestamp()),
+            market_date=self.market_date,
+        )
+
+        if hasattr(provider, "prefetch_underlying_prices") and self.market_client:
+            provider.prefetch_underlying_prices(instruments, self.market_client)
+
+        summary = {
+            "status": "completed",
+            "mode": execution_mode,
+            "opened_trades": 0,
+            "closed_trades": 0,
+            "net_pnl": Decimal("0"),
+            "instrument_summaries": [],
+            "trades": [],
+        }
+
+        import time as _time
+        for idx, instrument in enumerate(instruments):
+            if idx > 0:
+                _time.sleep(2)
+            for attempt in range(1, 4):
+                try:
+                    inst_summary, trade_details = self._backtest_instrument(
+                        instrument=instrument,
+                        provider=provider,
+                        execution_mode=execution_mode,
+                    )
+                    summary["opened_trades"] += inst_summary.opened
+                    summary["closed_trades"] += inst_summary.closed
+                    summary["net_pnl"] += inst_summary.pnl
+                    summary["instrument_summaries"].append(inst_summary.as_dict())
+                    summary["trades"].extend(trade_details)
+                    break
+                except Exception as exc:
+                    exc_msg = str(exc).lower()
+                    is_retryable = (
+                        "too many" in exc_msg
+                        or "try after" in exc_msg
+                        or "broken pipe" in exc_msg
+                        or "connection reset" in exc_msg
+                        or "connection aborted" in exc_msg
+                    )
+                    if is_retryable and attempt < 3:
+                        wait = 3 * attempt
+                        self.logger.warning(
+                            f"Retryable error on {instrument.instrument}, retry {attempt}/3 after {wait}s: {exc}"
+                        )
+                        _time.sleep(wait)
+                        continue
+                    self.logger.error(f"Failed to process {instrument.instrument}: {exc}")
+                    summary["instrument_summaries"].append({
+                        "instrument": instrument.instrument,
+                        "opened": 0,
+                        "closed": 0,
+                        "message": f"Error: {str(exc)}",
+                    })
+                    break
+
+        summary["net_pnl"] = str(summary["net_pnl"])
+        return summary
+
+    def _backtest_instrument(
+        self,
+        *,
+        instrument: Instrument,
+        provider: BaseMarketDataProvider,
+        execution_mode: str,
+    ) -> tuple[InstrumentSummary, list[dict]]:
+        """Process one instrument for backtest: detect entry, then simulate exit."""
+        summary = InstrumentSummary(instrument=instrument.instrument)
+        trade_details: list[dict] = []
+        self.logger.info(f"═══ [BACKTEST] Processing {instrument.instrument} ═══")
+
+        try:
+            snapshot = self._get_entry_snapshot(provider, instrument)
+            summary.price = snapshot.price
+        except MarketDataError as exc:
+            summary.message = f"Market data unavailable: {exc}"
+            return summary, trade_details
+
+        contracts = self._contract_specs(instrument, snapshot, provider)
+        market_day = self._current_market_day()
+
+        for contract in contracts:
+            self.logger.info(f"--- [BACKTEST] Contract: {contract.symbol} ({contract.option_type}) ---")
+
+            # Fetch ALL candles for the day in one go (already cached by _get_intraday_candles)
+            all_candles = self._get_intraday_candles(instrument, contract, market_day)
+            if len(all_candles) < 2:
+                summary.message = f"Not enough candles ({len(all_candles)})"
+                continue
+
+            # Get previous session levels
+            prev_levels = self._ensure_previous_session_levels(instrument, contract, market_day)
+            if not prev_levels:
+                summary.message = "previous_levels_unavailable"
+                continue
+
+            reference_high, reference_low = prev_levels
+
+            # Walk candles to find breakout entry
+            entry_candle_idx, entry_price, stop_loss = self._find_breakout_entry(
+                all_candles, reference_high, reference_low, instrument,
+            )
+
+            if entry_candle_idx is None:
+                summary.message = "no_breakout"
+                continue
+
+            # Compute trade parameters
+            direction = instrument.transaction or Instrument.Transaction.BUY
+            lots = max(instrument.no_of_lots or 0, 1)
+            lot_size = instrument.lot_size or 1
+            quantity = max(lots * lot_size, 1)
+            pl_points = _as_decimal(instrument.pl_points)
+            sl_points = _as_decimal(instrument.sl_points)
+            trailing_points = _as_decimal(instrument.trailing_points)
+            price = _quantize(entry_price)
+
+            if direction == Instrument.Transaction.BUY:
+                target_price = _quantize(price + pl_points) if pl_points else None
+                max_sl_price = _quantize(price - sl_points) if sl_points else None
+                stop_price = _quantize(stop_loss) if stop_loss is not None else max_sl_price
+                if max_sl_price is not None and stop_price is not None and stop_price < max_sl_price:
+                    stop_price = max_sl_price
+                trailing_price = _quantize(price - trailing_points) if trailing_points else stop_price
+            else:
+                target_price = _quantize(price - pl_points) if pl_points else None
+                max_sl_price = _quantize(price + sl_points) if sl_points else None
+                stop_price = _quantize(stop_loss) if stop_loss is not None else max_sl_price
+                if max_sl_price is not None and stop_price is not None and stop_price > max_sl_price:
+                    stop_price = max_sl_price
+                trailing_price = _quantize(price + trailing_points) if trailing_points else stop_price
+
+            entry_time = all_candles[entry_candle_idx].timestamp
+
+            self.logger.info(
+                f"BACKTEST ENTRY: {contract.symbol} @ {price}, "
+                f"SL={stop_price}, TP={target_price}, Trail={trailing_price}"
+            )
+
+            # Simulate monitoring through remaining candles
+            exit_price, exit_reason, exit_time = self._simulate_candle_monitoring(
+                candles=all_candles[entry_candle_idx:],
+                entry_price=price,
+                target_price=target_price,
+                stop_price=stop_price,
+                trailing_price=trailing_price,
+                trailing_points=trailing_points,
+                direction=direction,
+                market_day=market_day,
+            )
+
+            pnl = self._compute_backtest_pnl(
+                entry_price=price,
+                exit_price=exit_price,
+                quantity=quantity,
+                direction=direction,
+            )
+
+            self.logger.info(
+                f"BACKTEST EXIT: {contract.symbol} @ {exit_price} ({exit_reason}), PnL={pnl}"
+            )
+
+            # Create actual Trade record for persistence
+            entry_ts = entry_time
+            if timezone.is_naive(entry_ts):
+                entry_ts = timezone.make_aware(entry_ts, timezone.get_current_timezone())
+            exit_ts = exit_time
+            if exit_ts and timezone.is_naive(exit_ts):
+                exit_ts = timezone.make_aware(exit_ts, timezone.get_current_timezone())
+
+            trade = Trade.objects.create(
+                user=self.user,
+                strategy_code=self.STRATEGY_CODE,
+                instrument=instrument,
+                execution_mode=execution_mode,
+                status=Trade.Status.CLOSED,
+                direction=direction,
+                quantity=quantity,
+                entry_price=price,
+                entry_datetime=entry_ts,
+                exit_price=exit_price,
+                exit_datetime=exit_ts,
+                target_price=target_price,
+                stop_loss_price=stop_price,
+                trailing_stop_price=trailing_price,
+                last_price=exit_price,
+                pnl=pnl,
+                notes=f"Backtest: closed on {exit_reason} at {exit_price}",
+                contract_symbol=contract.symbol,
+                contract_token=contract.token,
+            )
+
+            summary.opened += 1
+            summary.closed += 1
+            summary.pnl += pnl
+
+            trade_details.append({
+                "trade_id": trade.id,
+                "instrument": instrument.instrument,
+                "contract": contract.symbol,
+                "option_type": contract.option_type,
+                "direction": direction,
+                "entry_price": str(price),
+                "entry_time": str(entry_ts),
+                "exit_price": str(exit_price),
+                "exit_time": str(exit_ts),
+                "exit_reason": exit_reason,
+                "target": str(target_price) if target_price else None,
+                "stop_loss": str(stop_price) if stop_price else None,
+                "pnl": str(pnl),
+                "quantity": quantity,
+            })
+
+        return summary, trade_details
+
+    def _find_breakout_entry(
+        self,
+        candles: list[Candle],
+        reference_high: Decimal,
+        reference_low: Decimal,
+        instrument: Instrument,
+    ) -> tuple[Optional[int], Optional[Decimal], Optional[Decimal]]:
+        """Walk candles to find the first breakout entry point.
+
+        Returns (entry_candle_index, entry_price, stop_loss) or (None, None, None).
+        """
+        current_high = reference_high
+        current_low = reference_low
+
+        for index, candle in enumerate(candles[:-1]):
+            if candle.close <= current_high:
+                continue
+
+            is_first = index == 0
+            if is_first and candle.open > current_high:
+                # Gap-up on first candle — skip, update levels
+                current_high = candle.high
+                current_low = candle.low
+                continue
+
+            # Breakout confirmed — enter on next candle's open
+            next_candle = candles[index + 1]
+            return index + 1, next_candle.open, current_low
+
+        return None, None, None
+
+    def _simulate_candle_monitoring(
+        self,
+        *,
+        candles: list[Candle],
+        entry_price: Decimal,
+        target_price: Optional[Decimal],
+        stop_price: Optional[Decimal],
+        trailing_price: Optional[Decimal],
+        trailing_points: Decimal,
+        direction: str,
+        market_day: date,
+    ) -> tuple[Decimal, str, Optional[datetime]]:
+        """Walk through candles after entry to simulate SL/TP/trailing/EOD checks.
+
+        Returns (exit_price, exit_reason, exit_time).
+        """
+        last_price = entry_price
+        current_trailing = trailing_price
+
+        for candle in candles:
+            # Check each candle's high and low for trigger hits
+            if direction == Instrument.Transaction.BUY:
+                # Check stop loss first (worst case: SL hit on low)
+                if stop_price is not None and candle.low <= stop_price:
+                    return stop_price, "stop_loss", candle.timestamp
+                if current_trailing is not None and candle.low <= current_trailing:
+                    return current_trailing, "trailing_stop", candle.timestamp
+                # Check target (hit on high)
+                if target_price is not None and candle.high >= target_price:
+                    return target_price, "target", candle.timestamp
+                # Update trailing stop if price moved favorably
+                if trailing_points > 0 and candle.high > last_price:
+                    candidate = _quantize(candle.high - trailing_points)
+                    if current_trailing is None or candidate > current_trailing:
+                        current_trailing = candidate
+                last_price = candle.close
+            else:
+                # SELL direction
+                if stop_price is not None and candle.high >= stop_price:
+                    return stop_price, "stop_loss", candle.timestamp
+                if current_trailing is not None and candle.high >= current_trailing:
+                    return current_trailing, "trailing_stop", candle.timestamp
+                if target_price is not None and candle.low <= target_price:
+                    return target_price, "target", candle.timestamp
+                if trailing_points > 0 and candle.low < last_price:
+                    candidate = _quantize(candle.low + trailing_points)
+                    if current_trailing is None or candidate < current_trailing:
+                        current_trailing = candidate
+                last_price = candle.close
+
+        # EOD exit — use last candle's close price
+        eod_time = self._market_time(market_day, time(15, 25))
+        return _quantize(last_price), "end_of_day", eod_time
+
+    @staticmethod
+    def _compute_backtest_pnl(
+        *,
+        entry_price: Decimal,
+        exit_price: Decimal,
+        quantity: int,
+        direction: str,
+    ) -> Decimal:
+        if direction == Instrument.Transaction.SELL:
+            diff = entry_price - exit_price
+        else:
+            diff = exit_price - entry_price
+        pnl = diff * quantity
+        return pnl.quantize(Decimal("0.05"), rounding=ROUND_HALF_UP)
 
     def _execute(
         self,
