@@ -4,7 +4,7 @@ import logging
 import subprocess
 import time as _time
 from contextlib import contextmanager
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from django.conf import settings
@@ -196,9 +196,34 @@ class Command(BaseCommand):
 
     @staticmethod
     def _market_is_open() -> bool:
-        """Return True if current IST time is within 09:16 – 15:25."""
+        """Return True if current IST time is within 09:15 – 15:25."""
         now = timezone.localtime()
-        return time(9, 16) <= now.time() <= time(15, 25)
+        return time(9, 15) <= now.time() <= time(15, 25)
+
+    @staticmethod
+    def _seconds_until_next_candle_close(candle_minutes: int = 5, buffer_secs: int = 2) -> float:
+        """Return seconds to sleep until the next candle boundary + buffer.
+
+        For 5-minute candles closing at :00, :05, :10, ... :55,
+        this calculates the wait so the scanner wakes at e.g. 09:20:02,
+        09:25:02 — right after the candle closes, with no drift.
+        """
+        now = timezone.localtime()
+        current_minute = now.minute
+        current_second = now.second + now.microsecond / 1_000_000
+
+        # Minutes into the current candle period
+        minutes_into_candle = current_minute % candle_minutes
+        # Seconds remaining until the candle boundary
+        remaining_minutes = candle_minutes - minutes_into_candle
+        remaining_seconds = (remaining_minutes * 60) - current_second + buffer_secs
+
+        # If we're past the boundary + buffer (e.g. 09:20:03 with 2s buffer),
+        # wait for the next one
+        if remaining_seconds <= 0:
+            remaining_seconds += candle_minutes * 60
+
+        return remaining_seconds
 
     def _start_monitor(self, username: str, logger: logging.Logger) -> None:
         self.stdout.write("\n" + "=" * 80)
@@ -249,14 +274,18 @@ class Command(BaseCommand):
         interval: int,
         logger: logging.Logger,
     ) -> None:
-        """Re-run strategy every `interval` seconds until trades open or market closes."""
+        """Re-run strategy aligned to 5-minute candle boundaries until trades open or market closes."""
         scan_number = 0
         logger.info("=" * 80)
-        logger.info("ENTRY SCANNER ACTIVE — checking every %d seconds", interval)
+        logger.info("ENTRY SCANNER ACTIVE — aligned to 5-minute candle closes")
         logger.info("=" * 80)
 
         while self._market_is_open():
-            _time.sleep(interval)
+            # Sleep until the next 5-minute candle boundary (e.g. 9:20:02, 9:25:02)
+            wait = self._seconds_until_next_candle_close(candle_minutes=5, buffer_secs=2)
+            next_wake = (timezone.localtime() + timedelta(seconds=wait)).strftime("%H:%M:%S")
+            logger.info("Sleeping %.1fs until next candle close at ~%s", wait, next_wake)
+            _time.sleep(wait)
             scan_number += 1
 
             if not self._market_is_open():
