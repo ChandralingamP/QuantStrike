@@ -194,6 +194,12 @@ class DemoMarketDataProvider(BaseMarketDataProvider):
 class LiveMarketDataProvider(BaseMarketDataProvider):
     """Attempts to retrieve live pricing via SmartAPI, with graceful fallback."""
 
+    INDEX_TOKEN_MAP = {
+        Instrument.InstrumentCode.NIFTY: ("NSE", "99926000"),
+        Instrument.InstrumentCode.BANKNIFTY: ("NSE", "99926009"),
+        Instrument.InstrumentCode.SENSEX: ("BSE", "99919000"),
+    }
+
     def __init__(
         self,
         profile: Optional[UserProfile],
@@ -203,6 +209,7 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
         self.profile = profile
         self.fallback = fallback
         self._client: Optional[SmartConnect] = None  # type: ignore[name-defined]
+        self._underlying_cache: dict[str, Decimal] = {}
 
     def _fallback_price(self, instrument: Instrument) -> Decimal:
         if not self.fallback:
@@ -289,6 +296,10 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
         return EntrySnapshot(price=price, previous_low=None, underlying_price=underlying)
 
     def get_underlying_price(self, instrument: Instrument) -> Optional[Decimal]:
+        # Return from cache if already fetched this run
+        cache_key = str(instrument.instrument)
+        if cache_key in self._underlying_cache:
+            return self._underlying_cache[cache_key]
         try:
             client = self._ensure_client()
             exchange, token = self._resolve_index_exchange_token(instrument)
@@ -300,20 +311,42 @@ class LiveMarketDataProvider(BaseMarketDataProvider):
             ltp = response.get("data", {}).get("ltp") if isinstance(response, dict) else None
             if ltp is None:
                 raise MarketDataError("SmartAPI response missing underlying LTP.")
-            return Decimal(str(ltp)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            price = Decimal(str(ltp)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            self._underlying_cache[cache_key] = price
+            return price
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.debug("Underlying price fallback for %s: %s", instrument.instrument, exc)
             if self.fallback:
                 return self.fallback.get_underlying_price(instrument)
             return None
 
+    def prefetch_underlying_prices(self, instruments: list, market_client) -> None:
+        """Batch-fetch underlying prices for all instruments in a single API call."""
+        exchange_tokens: dict[str, list[str]] = {}
+        instrument_map: dict[str, str] = {}  # "exchange:token" -> instrument_code
+        for inst in instruments:
+            mapping = self.INDEX_TOKEN_MAP.get(inst.instrument)
+            if not mapping:
+                continue
+            exchange, token = mapping
+            exchange_tokens.setdefault(exchange, []).append(token)
+            instrument_map[f"{exchange}:{token}"] = str(inst.instrument)
+        if not exchange_tokens or not market_client:
+            return
+        try:
+            ltp_data = market_client.get_ltp_batch(exchange_tokens=exchange_tokens)
+            for key, price in ltp_data.items():
+                inst_code = instrument_map.get(key)
+                if inst_code and price is not None:
+                    self._underlying_cache[inst_code] = Decimal(str(price)).quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+            logger.info("Prefetched %d underlying prices in 1 API call", len(self._underlying_cache))
+        except Exception as exc:
+            logger.warning("Underlying price prefetch failed, will fetch individually: %s", exc)
+
     def _resolve_index_exchange_token(self, instrument: Instrument) -> tuple[str, str]:
-        mapping = {
-            Instrument.InstrumentCode.NIFTY: ("NSE", "99926000"),
-            Instrument.InstrumentCode.BANKNIFTY: ("NSE", "99926009"),
-            Instrument.InstrumentCode.SENSEX: ("BSE", "99919000"),
-        }
-        result = mapping.get(instrument.instrument)
+        result = self.INDEX_TOKEN_MAP.get(instrument.instrument)
         if not result:
             raise MarketDataError(f"No index token configured for {instrument.instrument}.")
         return result

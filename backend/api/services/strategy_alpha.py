@@ -401,6 +401,11 @@ class StrategyAlphaEngine:
             logger=self.logger,
         )
 
+        # Batch-prefetch all underlying index prices in a single API call
+        # instead of 3 separate ltpData calls (one per instrument).
+        if hasattr(provider, "prefetch_underlying_prices") and self.market_client:
+            provider.prefetch_underlying_prices(instruments, self.market_client)
+
         summary = {
             "status": "completed",
             "mode": execution_mode,

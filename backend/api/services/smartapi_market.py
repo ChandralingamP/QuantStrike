@@ -75,8 +75,8 @@ class SmartAPIMarketClient:
             "todate": to_date_str,
         }
         
-        # Small delay to avoid rate limiting on consecutive calls
-        time.sleep(0.5)
+        # Delay to avoid rate limiting on consecutive calls
+        time.sleep(1.0)
 
         response = self._post(HISTORICAL_URL, payload)
         logger.info(f"🔍 SmartAPI Raw Response: {response}")
