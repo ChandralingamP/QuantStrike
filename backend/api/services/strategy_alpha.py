@@ -431,11 +431,17 @@ class StrategyAlphaEngine:
                     break  # success
                 except Exception as exc:
                     exc_msg = str(exc).lower()
-                    is_rate_limit = "too many" in exc_msg or "try after" in exc_msg
-                    if is_rate_limit and attempt < 3:
+                    is_retryable = (
+                        "too many" in exc_msg
+                        or "try after" in exc_msg
+                        or "broken pipe" in exc_msg
+                        or "connection reset" in exc_msg
+                        or "connection aborted" in exc_msg
+                    )
+                    if is_retryable and attempt < 3:
                         wait = 3 * attempt
                         self.logger.warning(
-                            f"Rate-limited on {instrument.instrument}, retry {attempt}/3 after {wait}s"
+                            f"Retryable error on {instrument.instrument}, retry {attempt}/3 after {wait}s: {exc}"
                         )
                         _time.sleep(wait)
                         continue

@@ -275,6 +275,7 @@ class SmartAPIMarketClient:
     def _post(self, url: str, payload: dict, max_retries: int = 3) -> dict:
         headers = build_headers(api_key=self.api_key, bearer_token=self.jwt_token)
         timeout = float(getattr(settings, "ANGEL_API_TIMEOUT", 30))
+        session = requests.Session()
         
         for attempt in range(max_retries):
             try:
@@ -284,14 +285,9 @@ class SmartAPIMarketClient:
                     logger.info(f"⏳ Retry {attempt + 1}/{max_retries} after {delay}s delay...")
                     time.sleep(delay)
                 
-                print(f"📤 POST Request:")
-                print(f"   URL: {url}")
-                print(f"   Payload: {payload}")
-                print(f"   Headers: {headers}")
-                response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+                response = session.post(url, headers=headers, json=payload, timeout=timeout)
                 response.raise_for_status()
                 result = response.json()
-                print(f"📥 Response: {result}")
 
                 if isinstance(result, dict) and not result.get("status"):
                     error_code = str(result.get("errorcode") or "").strip().upper()
@@ -310,12 +306,15 @@ class SmartAPIMarketClient:
                     logger.warning(f"⚠️  Rate limit hit (403), retrying... Attempt {attempt + 1}/{max_retries}")
                     continue
                 raise SmartAPIMarketError(f"SmartAPI request failed: {exc}") from exc
-            except requests.RequestException as exc:  # pragma: no cover - network interaction
+            except requests.RequestException as exc:
+                # Close the broken connection pool so the next attempt starts fresh
+                session.close()
+                session = requests.Session()
                 if attempt < max_retries - 1:
                     logger.warning(f"⚠️  Request failed: {exc}, retrying... Attempt {attempt + 1}/{max_retries}")
                     continue
                 raise SmartAPIMarketError(f"SmartAPI request failed: {exc}") from exc
-            except ValueError as exc:  # pragma: no cover - invalid JSON
+            except ValueError as exc:
                 raise SmartAPIMarketError("Invalid JSON received from SmartAPI.") from exc
         
         raise SmartAPIMarketError(f"Failed after {max_retries} retry attempts")
