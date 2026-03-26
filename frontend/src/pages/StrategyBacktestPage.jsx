@@ -14,7 +14,9 @@ export default function StrategyBacktestPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [error, setError] = useState("");
+  const [clearMessage, setClearMessage] = useState("");
   const [runs, setRuns] = useState([]);
 
   const dispatch = useDispatch();
@@ -116,6 +118,36 @@ export default function StrategyBacktestPage() {
       selectedInstrumentIds,
     ],
   );
+
+  const handleClearDemoTrades = useCallback(() => {
+    if (!username.trim()) {
+      setError("Enter a username first.");
+      return;
+    }
+    if (!window.confirm(`Delete ALL demo trades for "${username.trim()}"?`)) {
+      return;
+    }
+    setIsClearing(true);
+    setError("");
+    setClearMessage("");
+    axios
+      .post(
+        `${API_BASE_URL}/trades/demo/clear/`,
+        { username: username.trim(), api_username: getAuthUsername() },
+        { withCredentials: true },
+      )
+      .then((response) => {
+        setClearMessage(response.data?.message || "Demo trades cleared.");
+      })
+      .catch((err) => {
+        const detail =
+          err?.response?.data?.detail ||
+          err?.response?.data?.username?.[0] ||
+          "Failed to clear demo trades.";
+        setError(detail);
+      })
+      .finally(() => setIsClearing(false));
+  }, [username]);
 
   return (
     <div className="space-y-6">
@@ -286,13 +318,29 @@ export default function StrategyBacktestPage() {
           </div>
         ) : null}
 
-        <button
-          type="submit"
-          disabled={isRunning}
-          className="inline-flex items-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-brand-500/30 transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700"
-        >
-          {isRunning ? "Running backtest..." : "Run backtest"}
-        </button>
+        {clearMessage ? (
+          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {clearMessage}
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={isRunning}
+            className="inline-flex items-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-brand-500/30 transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700"
+          >
+            {isRunning ? "Running backtest..." : "Run backtest"}
+          </button>
+          <button
+            type="button"
+            disabled={isClearing || !username.trim()}
+            onClick={handleClearDemoTrades}
+            className="inline-flex items-center rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isClearing ? "Clearing..." : "Clear demo trades"}
+          </button>
+        </div>
       </form>
 
       {runs.length > 0 && (

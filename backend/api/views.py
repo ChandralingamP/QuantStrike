@@ -516,6 +516,47 @@ class StrategyOneBacktestView(APIView):
         return Response({"runs": runs})
 
 
+class ClearDemoTradesView(APIView):
+    """Admin-only endpoint to clear demo trade records for a user."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not settings.DEBUG:
+            api_username = request.data.get("api_username")
+            if not api_username:
+                raise ValidationError({"api_username": "Admin username is required."})
+            try:
+                api_user = User.objects.get(username__iexact=api_username)
+            except User.DoesNotExist as exc:
+                raise ValidationError({"api_username": "Admin user not found."}) from exc
+            if not api_user.is_staff:
+                raise ValidationError({"detail": "Only admin users can clear trades."})
+
+        username = request.data.get("username")
+        if not username:
+            raise ValidationError({"username": "Username is required."})
+        try:
+            target_user = User.objects.get(username__iexact=username)
+        except User.DoesNotExist as exc:
+            raise ValidationError({"username": "User not found."}) from exc
+
+        deleted_count, _ = Trade.objects.filter(
+            user=target_user,
+            execution_mode=Trade.ExecutionMode.DEMO,
+        ).delete()
+
+        return Response({
+            "deleted": deleted_count,
+            "message": f"Deleted {deleted_count} demo trade(s) for {target_user.username}.",
+        })
+
+
 class RequestOTPView(APIView):
     authentication_classes = []
     permission_classes = []

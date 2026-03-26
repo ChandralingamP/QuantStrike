@@ -432,6 +432,18 @@ class StrategyAlphaEngine:
         if hasattr(provider, "prefetch_underlying_prices") and self.market_client:
             provider.prefetch_underlying_prices(instruments, self.market_client)
 
+        # Delete any existing backtest trades for this user/date/mode to avoid duplicates
+        if self.market_date:
+            deleted_count, _ = Trade.objects.filter(
+                user=self.user,
+                strategy_code=self.STRATEGY_CODE,
+                execution_mode=execution_mode,
+                notes__startswith="Backtest:",
+                entry_datetime__date=self.market_date,
+            ).delete()
+            if deleted_count:
+                self.logger.info(f"Cleared {deleted_count} existing backtest trade(s) for {self.market_date}")
+
         summary = {
             "status": "completed",
             "mode": execution_mode,
@@ -1609,18 +1621,40 @@ class StrategyAlphaEngine:
         if not trigger:
             return 0, Decimal("0"), None
 
+        # Use the exact SL/TP level as exit price instead of the current LTP.
+        # In reality the order would fill at the trigger level, not at whatever
+        # the LTP happens to be when we check.
+        effective_price = self._effective_exit_price(trade, price, trigger)
+
         exit_result = order_executor.place_exit_order(
             instrument=instrument,
             trade=trade,
-            reference_price=price,
+            reference_price=effective_price,
         )
-        exit_price = _quantize(exit_result.get("average_price", price))
+        exit_price = _quantize(exit_result.get("average_price", effective_price))
         order_id = exit_result.get("order_id")
 
         pnl = self._close_trade(trade, exit_price, trigger, order_id=order_id)
         if trade.direction == Instrument.Transaction.SELL:
             pnl = pnl
         return 1, pnl, trigger
+
+    @staticmethod
+    def _effective_exit_price(
+        trade: Trade, price: Decimal, trigger: str,
+    ) -> Decimal:
+        """Return the exact SL/TP/trailing level when a trigger fires.
+
+        For demo and backtest we assume fills at the trigger price, not the
+        observed LTP which may overshoot.
+        """
+        if trigger == "target" and trade.target_price is not None:
+            return trade.target_price
+        if trigger == "stop_loss" and trade.stop_loss_price is not None:
+            return trade.stop_loss_price
+        if trigger == "trailing_stop" and trade.trailing_stop_price is not None:
+            return trade.trailing_stop_price
+        return price
 
     def _should_close_trade(self, trade: Trade, price: Decimal) -> Optional[str]:
         if trade.direction == Instrument.Transaction.SELL:

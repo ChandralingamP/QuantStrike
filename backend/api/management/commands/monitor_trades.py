@@ -208,12 +208,20 @@ class Command(BaseCommand):
                 exit_reason = f"Target Hit (₹{current_price} >= ₹{trade.target_price})"
 
             if should_exit:
+                # Use the exact SL/TP level as exit price, not the LTP
+                if "SL Hit" in exit_reason and trade.stop_loss_price:
+                    exit_price = trade.stop_loss_price
+                elif "Target Hit" in exit_reason and trade.target_price:
+                    exit_price = trade.target_price
+                else:
+                    exit_price = current_price
                 trade.status = Trade.Status.CLOSED
-                trade.exit_price = current_price
+                trade.exit_price = exit_price
+                trade.last_price = exit_price
                 trade.exit_datetime = timezone.now()
                 trade.pnl = trade.get_realtime_pnl()
                 trade.save(update_fields=[
-                    "status", "exit_price", "exit_datetime", "pnl", "updated_at",
+                    "status", "exit_price", "exit_datetime", "last_price", "pnl", "updated_at",
                 ])
                 exits_performed += 1
                 pnl_color = self.style.SUCCESS if trade.pnl >= 0 else self.style.ERROR

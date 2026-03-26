@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AdminUserManagementView,
     AlgoConfigurationView,
+    ClearDemoTradesView,
     HomeConnectView,
     HomeStatusView,
     InstrumentViewSet,
@@ -63,6 +64,11 @@ urlpatterns = [
         "strategy/one/backtest/",
         StrategyOneBacktestView.as_view(),
         name="strategy-one-backtest",
+    ),
+    path(
+        "trades/demo/clear/",
+        ClearDemoTradesView.as_view(),
+        name="clear-demo-trades",
     ),
     path("logs/files/", LogFilesListView.as_view(), name="log-files-list"),
     path("logs/content/", LogFileContentView.as_view(), name="log-file-content"),
