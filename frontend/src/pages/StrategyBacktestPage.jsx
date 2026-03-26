@@ -56,7 +56,7 @@ export default function StrategyBacktestPage() {
 
       if (marketDate && (startDate || endDate)) {
         setError(
-          "Use either a single market date or a start/end range, not both."
+          "Use either a single market date or a start/end range, not both.",
         );
         return;
       }
@@ -114,7 +114,7 @@ export default function StrategyBacktestPage() {
       endDate,
       selectedStrategy,
       selectedInstrumentIds,
-    ]
+    ],
   );
 
   return (
@@ -328,8 +328,8 @@ export default function StrategyBacktestPage() {
                         parseFloat(run.summary.net_pnl) > 0
                           ? "text-emerald-400"
                           : parseFloat(run.summary.net_pnl) < 0
-                          ? "text-rose-400"
-                          : "text-slate-300"
+                            ? "text-rose-400"
+                            : "text-slate-300"
                       }`}
                     >
                       Net P&L: ₹
@@ -360,18 +360,24 @@ export default function StrategyBacktestPage() {
                             </td>
                             <td className="px-3 py-2">{instrument.opened}</td>
                             <td className="px-3 py-2">{instrument.closed}</td>
-                            <td className={`px-3 py-2 font-medium ${
-                              instrument.pnl && parseFloat(instrument.pnl) > 0
-                                ? "text-emerald-400"
-                                : instrument.pnl && parseFloat(instrument.pnl) < 0
-                                ? "text-rose-400"
-                                : "text-slate-300"
-                            }`}>
+                            <td
+                              className={`px-3 py-2 font-medium ${
+                                instrument.pnl && parseFloat(instrument.pnl) > 0
+                                  ? "text-emerald-400"
+                                  : instrument.pnl &&
+                                      parseFloat(instrument.pnl) < 0
+                                    ? "text-rose-400"
+                                    : "text-slate-300"
+                              }`}
+                            >
                               {instrument.pnl
-                                ? `₹${parseFloat(instrument.pnl).toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}`
+                                ? `₹${parseFloat(instrument.pnl).toLocaleString(
+                                    "en-IN",
+                                    {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    },
+                                  )}`
                                 : "—"}
                             </td>
                             <td className="px-3 py-2 text-slate-300">
@@ -419,7 +425,9 @@ export default function StrategyBacktestPage() {
                                   {trade.option_type}
                                 </span>
                               </td>
-                              <td className="px-3 py-2">₹{trade.entry_price}</td>
+                              <td className="px-3 py-2">
+                                ₹{trade.entry_price}
+                              </td>
                               <td className="px-3 py-2">₹{trade.exit_price}</td>
                               <td className="px-3 py-2 text-slate-400">
                                 {trade.stop_loss ? `₹${trade.stop_loss}` : "—"}
@@ -433,10 +441,10 @@ export default function StrategyBacktestPage() {
                                     trade.exit_reason === "target"
                                       ? "bg-emerald-500/20 text-emerald-300"
                                       : trade.exit_reason === "stop_loss"
-                                      ? "bg-rose-500/20 text-rose-300"
-                                      : trade.exit_reason === "trailing_stop"
-                                      ? "bg-amber-500/20 text-amber-300"
-                                      : "bg-slate-500/20 text-slate-300"
+                                        ? "bg-rose-500/20 text-rose-300"
+                                        : trade.exit_reason === "trailing_stop"
+                                          ? "bg-amber-500/20 text-amber-300"
+                                          : "bg-slate-500/20 text-slate-300"
                                   }`}
                                 >
                                   {(trade.exit_reason || "").replace("_", " ")}
@@ -447,11 +455,12 @@ export default function StrategyBacktestPage() {
                                   parseFloat(trade.pnl) > 0
                                     ? "text-emerald-400"
                                     : parseFloat(trade.pnl) < 0
-                                    ? "text-rose-400"
-                                    : "text-slate-300"
+                                      ? "text-rose-400"
+                                      : "text-slate-300"
                                 }`}
                               >
-                                ₹{parseFloat(trade.pnl).toLocaleString("en-IN", {
+                                ₹
+                                {parseFloat(trade.pnl).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                   maximumFractionDigits: 2,
                                 })}

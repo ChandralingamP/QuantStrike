@@ -499,15 +499,27 @@ class StrategyAlphaEngine:
         trade_details: list[dict] = []
         self.logger.info(f"═══ [BACKTEST] Processing {instrument.instrument} ═══")
 
-        try:
-            snapshot = self._get_entry_snapshot(provider, instrument)
-            summary.price = snapshot.price
-        except MarketDataError as exc:
-            summary.message = f"Market data unavailable: {exc}"
-            return summary, trade_details
+        market_day = self._current_market_day()
+
+        # For backtesting, fetch the underlying index price from historical candles
+        # instead of relying on HistoricalMarketDataProvider which may fail for
+        # expired contracts.
+        underlying_price = self._get_backtest_underlying_price(instrument, market_day)
+        if underlying_price is None:
+            try:
+                snapshot = self._get_entry_snapshot(provider, instrument)
+                underlying_price = snapshot.underlying_price or snapshot.price
+            except MarketDataError as exc:
+                summary.message = f"Market data unavailable: {exc}"
+                return summary, trade_details
+
+        snapshot = EntrySnapshot(
+            price=underlying_price,
+            underlying_price=underlying_price,
+        )
+        summary.price = underlying_price
 
         contracts = self._contract_specs(instrument, snapshot, provider)
-        market_day = self._current_market_day()
 
         for contract in contracts:
             self.logger.info(f"--- [BACKTEST] Contract: {contract.symbol} ({contract.option_type}) ---")
@@ -742,6 +754,47 @@ class StrategyAlphaEngine:
             diff = exit_price - entry_price
         pnl = diff * quantity
         return pnl.quantize(Decimal("0.05"), rounding=ROUND_HALF_UP)
+
+    def _get_backtest_underlying_price(
+        self,
+        instrument: Instrument,
+        market_day: date,
+    ) -> Optional[Decimal]:
+        """Fetch the underlying index opening price for a historical date.
+
+        Uses the market_client to fetch a 1-minute candle at 9:15 AM
+        from the index (not option) token.
+        """
+        if not self.market_client:
+            return None
+
+        from .market_data import LiveMarketDataProvider
+        mapping = LiveMarketDataProvider.INDEX_TOKEN_MAP.get(instrument.instrument)
+        if not mapping:
+            return None
+
+        exchange, token = mapping
+        start = self._market_time(market_day, time(9, 15))
+        end = self._market_time(market_day, time(9, 20))
+        try:
+            candles = self.market_client.get_option_candles(
+                exchange=exchange,
+                symbol_token=token,
+                interval="FIVE_MINUTE",
+                start=start,
+                end=end,
+            )
+            if candles:
+                price = candles[0].open
+                self.logger.info(
+                    f"Backtest underlying price for {instrument.instrument} on {market_day}: {price}"
+                )
+                return Decimal(str(price)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        except Exception as exc:
+            self.logger.warning(
+                f"Failed to fetch backtest underlying price for {instrument.instrument}: {exc}"
+            )
+        return None
 
     def _execute(
         self,
