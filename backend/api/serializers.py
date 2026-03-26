@@ -354,19 +354,29 @@ class InstrumentSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"contract_expiry": "Invalid expiry format. Use DDMMMYYYY."}
                 )
-            instrument_code = (
-                self.instance.instrument
+            # Skip expiry-map validation when the code hasn't changed
+            # (allows saving other fields even after the expiry has passed)
+            existing_code = (
+                self.instance.contract_expiry_code
                 if self.instance is not None
-                else (self.initial_data.get("instrument") or "")
+                else None
             )
-            expiry_map = self.context.get("expiry_map") or {}
-            allowed_values = {value.upper() for value in expiry_map.get(instrument_code.upper(), [])}
-            # Only validate against allowed values if the expiry map is loaded and has entries
-            # This prevents validation failures when the expiry data files are missing/not synced yet
-            if allowed_values and expiry_code.upper() not in allowed_values:
-                raise serializers.ValidationError(
-                    {"contract_expiry": f"Expiry {expiry_code} is not available for this instrument. Available expiries: {', '.join(sorted(allowed_values))}"}
+            expiry_changed = (
+                existing_code is None
+                or expiry_code.upper() != (existing_code or "").upper()
+            )
+            if expiry_changed:
+                instrument_code = (
+                    self.instance.instrument
+                    if self.instance is not None
+                    else (self.initial_data.get("instrument") or "")
                 )
+                expiry_map = self.context.get("expiry_map") or {}
+                allowed_values = {value.upper() for value in expiry_map.get(instrument_code.upper(), [])}
+                if allowed_values and expiry_code.upper() not in allowed_values:
+                    raise serializers.ValidationError(
+                        {"contract_expiry": f"Expiry {expiry_code} is not available for this instrument. Available expiries: {', '.join(sorted(allowed_values))}"}
+                    )
             data["_parsed_expiry"] = expiry
 
         lot_size = data.get("lot_size")
