@@ -1104,6 +1104,26 @@ class StrategyAlphaEngine:
             "PE",
             label="alternate",
         )
+
+        # If tokens couldn't be resolved (expired contracts removed from
+        # scrip master), try the nearest available expiry.
+        if not ce_spec.token or not pe_spec.token:
+            fallback_code = self._nearest_available_expiry(instrument)
+            if fallback_code and fallback_code.upper() != expiry_code.upper():
+                self.logger.info(
+                    "Configured expiry %s not found in scrip master for %s; "
+                    "using nearest available: %s",
+                    expiry_code, instrument.instrument, fallback_code,
+                )
+                if not ce_spec.token:
+                    ce_spec = self._build_contract_spec(
+                        instrument, fallback_code, ce_strike, "CE", label="primary",
+                    )
+                if not pe_spec.token:
+                    pe_spec = self._build_contract_spec(
+                        instrument, fallback_code, pe_strike, "PE", label="alternate",
+                    )
+
         specs = [spec for spec in (ce_spec, pe_spec) if spec]
         if not specs:
             raise StrategySkip("Unable to determine ATM contracts for instrument.")
@@ -1172,6 +1192,23 @@ class StrategyAlphaEngine:
                 )
             )
         return [spec for spec in specs if spec.symbol and spec.token]
+
+    def _nearest_available_expiry(self, instrument: Instrument) -> str:
+        """Find the nearest valid expiry on or after the market day from the expiry map."""
+        from ..utils.instrument_data import load_expiry_map, next_valid_expiry
+
+        expiry_map = load_expiry_map()
+        available = expiry_map.get(instrument.instrument.upper(), [])
+        if not available:
+            return ""
+        market_day = self._current_market_day()
+        code = next_valid_expiry(available, market_day)
+        if not code:
+            return ""
+        parsed = parse_expiry_code(code)
+        if parsed:
+            return parsed.strftime("%d%b%y").upper()
+        return code.upper()
 
     def _resolve_expiry_code(self, instrument: Instrument) -> str:
         if instrument.contract_expiry:
