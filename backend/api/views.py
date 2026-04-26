@@ -1047,6 +1047,85 @@ class HomeConnectView(APIView):
             }
         )
 
+
+class HomeProfileUpdateView(APIView):
+    """Allow users to update their API key and client ID."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def patch(self, request, *args, **kwargs):
+        username = request.data.get("username")
+        if not username:
+            return Response(
+                {"detail": "Username is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(username__iexact=username)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "User not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            profile = user.profile
+        except UserProfile.DoesNotExist:
+            return Response(
+                {"detail": "User profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        api_key = request.data.get("api_key")
+        if api_key is not None:
+            api_key = str(api_key).strip()
+            if not api_key:
+                return Response(
+                    {"detail": "API key cannot be empty."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if len(api_key) > 128:
+                return Response(
+                    {"detail": "API key is too long."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            profile.api_key = api_key
+            # Invalidate existing session since old key is no longer valid
+            profile.jwt_token = ""
+            profile.refresh_token = ""
+            profile.feed_token = ""
+            profile.token_state = ""
+            profile.save(update_fields=[
+                "api_key", "jwt_token", "refresh_token",
+                "feed_token", "token_state", "updated_at",
+            ])
+        else:
+            return Response(
+                {"detail": "No fields to update."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile.refresh_from_db()
+        return Response({
+            "message": "Profile updated successfully.",
+            "details": {
+                "client_id": profile.brokerage_user_id,
+                "api_key_masked": mask_api_key(profile.api_key),
+                "last_updated": profile.updated_at.isoformat(),
+                "connection_state": profile.token_state or "idle",
+                "connection_message": None,
+                "last_connected_at": profile.token_received_at.isoformat()
+                if profile.token_received_at
+                else None,
+            },
+        })
+
 class AdminUserManagementView(APIView):
     authentication_classes = []
     permission_classes = []

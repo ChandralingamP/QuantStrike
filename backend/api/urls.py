@@ -6,6 +6,7 @@ from .views import (
     AlgoConfigurationView,
     ClearDemoTradesView,
     HomeConnectView,
+    HomeProfileUpdateView,
     HomeStatusView,
     InstrumentViewSet,
     LoginView,
@@ -53,6 +54,7 @@ urlpatterns = [
     path("algo/config", AlgoConfigurationView.as_view(), name="algo-config"),
     path("home/status/", HomeStatusView.as_view(), name="home-status"),
     path("home/connect/", HomeConnectView.as_view(), name="home-connect"),
+    path("home/profile/", HomeProfileUpdateView.as_view(), name="home-profile-update"),
     path("pnl", ProfitLossView.as_view(), name="pnl-list"),
     path("pnl/export", ProfitLossExportView.as_view(), name="pnl-export"),
     path(

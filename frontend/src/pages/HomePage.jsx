@@ -4,6 +4,7 @@ import {
   connectBrokerage,
   fetchAccountStatus,
   hydrateFromCache as hydrateHomeFromCache,
+  updateApiKey,
 } from "../features/home/homeSlice";
 import { getAuthUsername } from "../utils/authCookies.js";
 import {
@@ -22,10 +23,12 @@ const defaultFormState = {
 export default function HomePage() {
   const dispatch = useDispatch();
   const authUsername = getAuthUsername();
-  const { details, status, error, connection } = useSelector(
+  const { details, status, error, connection, profileUpdate } = useSelector(
     (state) => state.home
   );
   const [formState, setFormState] = useState(defaultFormState);
+  const [editingApiKey, setEditingApiKey] = useState(false);
+  const [newApiKey, setNewApiKey] = useState("");
 
   useEffect(() => {
     if (!authUsername) {
@@ -162,10 +165,97 @@ export default function HomePage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-400">API Key</dt>
-                <dd className="font-medium">
+                <dd className="flex items-center gap-2 font-medium">
                   {detailsSnapshot.api_key_masked || "************"}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingApiKey((prev) => !prev);
+                      setNewApiKey("");
+                    }}
+                    className="rounded p-1 text-slate-400 transition hover:text-brand-300"
+                    title="Edit API Key"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-3.5 w-3.5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                    </svg>
+                  </button>
                 </dd>
               </div>
+              {editingApiKey && (
+                <div className="mt-2 rounded-lg border border-slate-700 bg-slate-900/80 p-3">
+                  <label
+                    className="mb-1 block text-xs font-medium text-slate-400"
+                    htmlFor="new-api-key"
+                  >
+                    New API Key
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="new-api-key"
+                      type="text"
+                      value={newApiKey}
+                      onChange={(e) => setNewApiKey(e.target.value)}
+                      placeholder="Enter new Angel One API key"
+                      className="flex-1 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-sm text-white focus:border-brand-400 focus:outline-none focus:ring focus:ring-brand-500/20"
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      disabled={
+                        !newApiKey.trim() ||
+                        profileUpdate.status === "loading"
+                      }
+                      onClick={() => {
+                        if (!authUsername || !newApiKey.trim()) return;
+                        dispatch(
+                          updateApiKey({
+                            username: authUsername,
+                            api_key: newApiKey.trim(),
+                          })
+                        ).then((action) => {
+                          if (action.meta.requestStatus === "fulfilled") {
+                            setEditingApiKey(false);
+                            setNewApiKey("");
+                          }
+                        });
+                      }}
+                      className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-600"
+                    >
+                      {profileUpdate.status === "loading"
+                        ? "Saving..."
+                        : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingApiKey(false);
+                        setNewApiKey("");
+                      }}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {profileUpdate.status === "succeeded" &&
+                    profileUpdate.message && (
+                      <p className="mt-2 text-xs text-emerald-400">
+                        {profileUpdate.message}
+                      </p>
+                    )}
+                  {profileUpdate.status === "failed" &&
+                    profileUpdate.message && (
+                      <p className="mt-2 text-xs text-rose-400">
+                        {profileUpdate.message}
+                      </p>
+                    )}
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-slate-400">Session Status</dt>
                 <dd className="font-medium">{badgeLabel}</dd>
