@@ -231,10 +231,14 @@ class Command(BaseCommand):
         self.stdout.write("=" * 80)
         try:
             import sys as _sys
+            logs_dir = Path(settings.BASE_DIR) / "logs" / "users"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            monitor_log = open(logs_dir / f"{username}_monitor.log", "a")
             subprocess.Popen(
                 [_sys.executable, "manage.py", "monitor_trades", username, "--interval", "15"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=monitor_log,
+                stderr=monitor_log,
+                start_new_session=True,
             )
             self.stdout.write(self.style.SUCCESS("✅ Monitor started in background"))
             logger.info("Monitor started in background")
@@ -253,10 +257,14 @@ class Command(BaseCommand):
             cmd = [_sys.executable, "manage.py", "run_strategy_alpha", username, "--scan-entries"]
             if mode_override:
                 cmd.extend(["--mode", mode_override])
+            logs_dir = Path(settings.BASE_DIR) / "logs" / "users"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            scanner_log = open(logs_dir / f"{username}_scanner.log", "a")
             subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=scanner_log,
+                stderr=scanner_log,
+                start_new_session=True,
             )
             self.stdout.write(self.style.SUCCESS("✅ Entry scanner started in background"))
             self.stdout.write("Scanner will re-check every 5 minutes until trades open or market closes.")
