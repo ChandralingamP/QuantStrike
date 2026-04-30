@@ -3,6 +3,331 @@ import { useNavigate } from "react-router-dom";
 import { getAuthUsername } from "../utils/authCookies";
 import { API_BASE_URL } from "../utils/constants";
 
+// ─── Log Parser ─────────────────────────────────────────────────────────────
+
+function parseLogSessions(rawContent) {
+  if (!rawContent) return [];
+  const lines = rawContent.split("\n");
+  const sessions = [];
+  let current = null;
+
+  for (const line of lines) {
+    // Detect session start
+    if (line.includes("STRATEGY ALPHA EXECUTION -")) {
+      current = {
+        timestamp: line.substring(0, 19),
+        mode: "",
+        instruments: [],
+        summary: {},
+        errors: [],
+        trades: [],
+        monitorEvents: [],
+      };
+      sessions.push(current);
+      continue;
+    }
+
+    // Monitor log session
+    if (line.includes("TRADE MONITOR SERVICE STARTED")) {
+      current = {
+        timestamp: "",
+        mode: "monitor",
+        instruments: [],
+        summary: {},
+        errors: [],
+        trades: [],
+        monitorEvents: [],
+      };
+      sessions.push(current);
+      continue;
+    }
+
+    if (!current) continue;
+
+    const msg = line.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| \w+ \| /, "");
+
+    // Parse mode
+    if (msg.startsWith("Mode:")) {
+      current.mode = msg.replace("Mode: ", "").trim();
+    }
+
+    // Parse timestamp for monitor
+    if (msg.includes("Started at:")) {
+      current.timestamp = msg.replace(/.*Started at:\s*/, "").trim();
+    }
+
+    // Instrument processing
+    if (msg.includes("═══ Processing")) {
+      const match = msg.match(/Processing (\w+)/);
+      if (match) {
+        current._currentInstrument = {
+          name: match[1],
+          contracts: [],
+          status: "processed",
+        };
+        current.instruments.push(current._currentInstrument);
+      }
+    }
+
+    // Contract details
+    if (msg.includes("--- Contract:")) {
+      const match = msg.match(/Contract: (\S+)/);
+      if (match && current._currentInstrument) {
+        current._currentContract = { symbol: match[1], result: "" };
+        current._currentInstrument.contracts.push(current._currentContract);
+      }
+    }
+
+    // Breakout
+    if (msg.includes("BREAKOUT CONFIRMED")) {
+      const match = msg.match(/Entry: ([\d.]+), SL: ([\d.]+)/);
+      if (current._currentContract) {
+        current._currentContract.result = "breakout";
+        current._currentContract.entry = match ? match[1] : "";
+        current._currentContract.sl = match ? match[2] : "";
+      }
+    }
+
+    if (msg.includes("No breakout detected")) {
+      if (current._currentContract) {
+        current._currentContract.result = "no_breakout";
+      }
+    }
+
+    // Trade opened
+    if (msg.includes("Opened BUY") || msg.includes("Opened SELL")) {
+      const match = msg.match(/Opened (\w+) position for (\w+) at ([\d.]+) \(target=([\d.]+), stop=([\d.]+)\)/);
+      if (match) {
+        current.trades.push({
+          type: "open",
+          direction: match[1],
+          instrument: match[2],
+          entry: match[3],
+          target: match[4],
+          stopLoss: match[5],
+        });
+      }
+    }
+
+    // Monitor auto-exit
+    if (msg.includes("AUTO-EXIT EXECUTED")) {
+      current._pendingExit = {};
+    }
+    if (current._pendingExit) {
+      if (msg.includes("Trade #")) {
+        const match = msg.match(/Trade #(\d+): (.+)/);
+        if (match) {
+          current._pendingExit.id = match[1];
+          current._pendingExit.symbol = match[2];
+        }
+      }
+      if (msg.includes("Reason:")) {
+        current._pendingExit.reason = msg.replace(/.*Reason:\s*/, "").trim();
+      }
+      if (msg.includes("Entry:") && msg.includes("Exit:")) {
+        const match = msg.match(/Entry: ₹([\d.]+) → Exit: ₹([\d.]+)/);
+        if (match) {
+          current._pendingExit.entry = match[1];
+          current._pendingExit.exit = match[2];
+        }
+      }
+      if (msg.includes("P&L:")) {
+        const match = msg.match(/P&L: ₹([-\d,.]+)/);
+        if (match) {
+          current._pendingExit.pnl = match[1];
+          current.monitorEvents.push({ ...current._pendingExit });
+          current._pendingExit = null;
+        }
+      }
+    }
+
+    // Summary fields
+    if (msg.startsWith("Status:")) current.summary.status = msg.replace("Status: ", "");
+    if (msg.startsWith("Opened Trades:")) current.summary.opened = msg.replace("Opened Trades: ", "");
+    if (msg.startsWith("Closed Trades:")) current.summary.closed = msg.replace("Closed Trades: ", "");
+    if (msg.startsWith("Net P&L:")) current.summary.pnl = msg.replace("Net P&L: ", "");
+
+    // Errors
+    if (line.includes("| ERROR |")) {
+      current.errors.push(msg.replace(/^❌\s*/, ""));
+    }
+
+    // ALL TRADES CLOSED
+    if (msg.includes("ALL TRADES CLOSED")) {
+      current.summary.status = "all_closed";
+    }
+  }
+
+  // Clean up internal state
+  for (const s of sessions) {
+    delete s._currentInstrument;
+    delete s._currentContract;
+    delete s._pendingExit;
+  }
+
+  return sessions.reverse(); // newest first
+}
+
+// ─── Summary View Component ─────────────────────────────────────────────────
+
+function SessionCard({ session, index }) {
+  const isMonitor = session.mode === "monitor";
+  const hasErrors = session.errors.length > 0;
+  const hasTrades = session.trades.length > 0 || session.monitorEvents.length > 0;
+  const pnl = session.summary.pnl ? parseFloat(session.summary.pnl) : null;
+  const totalMonitorPnl = session.monitorEvents.reduce(
+    (sum, e) => sum + (parseFloat(e.pnl?.replace(",", "") || "0")), 0
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/70 p-4 mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            isMonitor
+              ? "bg-purple-500/20 text-purple-300"
+              : "bg-blue-500/20 text-blue-300"
+          }`}>
+            {isMonitor ? "Monitor" : "Strategy"}
+          </span>
+          <span className="text-sm text-slate-300">{session.timestamp}</span>
+          {session.mode && !isMonitor && (
+            <span className="text-xs text-slate-500 uppercase">{session.mode}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {hasTrades && (
+            <span className="text-xs font-medium text-emerald-400">
+              {session.trades.length} trade(s) opened
+            </span>
+          )}
+          {hasErrors && (
+            <span className="text-xs font-medium text-rose-400">
+              {session.errors.length} error(s)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Trades Opened */}
+      {session.trades.length > 0 && (
+        <div className="mb-3">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Trades Opened</h4>
+          <div className="space-y-1.5">
+            {session.trades.map((t, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg bg-slate-900/60 px-3 py-2 text-sm">
+                <span className={`font-semibold ${t.direction === "BUY" ? "text-emerald-400" : "text-rose-400"}`}>
+                  {t.direction}
+                </span>
+                <span className="text-slate-200">{t.instrument}</span>
+                <span className="text-slate-400">@</span>
+                <span className="text-white font-medium">₹{t.entry}</span>
+                <span className="text-slate-500">→</span>
+                <span className="text-xs text-slate-400">TP: ₹{t.target}</span>
+                <span className="text-xs text-slate-400">SL: ₹{t.stopLoss}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Monitor Exit Events */}
+      {session.monitorEvents.length > 0 && (
+        <div className="mb-3">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Auto-Exits</h4>
+          <div className="space-y-1.5">
+            {session.monitorEvents.map((e, i) => (
+              <div key={i} className="flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-2 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-200 font-medium">{e.symbol}</span>
+                  <span className="text-xs text-slate-400">{e.reason}</span>
+                </div>
+                <span className={`font-semibold ${parseFloat(e.pnl?.replace(",", "") || "0") >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  ₹{e.pnl}
+                </span>
+              </div>
+            ))}
+            <div className="text-right text-sm font-semibold mt-1">
+              <span className="text-slate-400 mr-2">Total:</span>
+              <span className={totalMonitorPnl >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                ₹{totalMonitorPnl.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Instruments Summary (only if no trades opened — keep it brief) */}
+      {!hasTrades && !isMonitor && session.instruments.length > 0 && (
+        <div className="mb-2">
+          <div className="flex flex-wrap gap-2">
+            {session.instruments.map((inst, i) => {
+              const hasBreakout = inst.contracts.some((c) => c.result === "breakout");
+              return (
+                <span key={i} className={`inline-flex items-center rounded-md px-2 py-1 text-xs ${
+                  hasBreakout
+                    ? "bg-emerald-500/20 text-emerald-300"
+                    : "bg-slate-700/60 text-slate-400"
+                }`}>
+                  {inst.name}
+                  {!hasBreakout && " — no breakout"}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Errors */}
+      {hasErrors && (
+        <div className="mt-2 space-y-1">
+          {session.errors.slice(0, 3).map((err, i) => (
+            <p key={i} className="text-xs text-rose-400/80 truncate">⚠ {err}</p>
+          ))}
+          {session.errors.length > 3 && (
+            <p className="text-xs text-slate-500">+{session.errors.length - 3} more errors</p>
+          )}
+        </div>
+      )}
+
+      {/* Summary bar */}
+      {session.summary.status && !isMonitor && (
+        <div className="mt-3 flex items-center gap-4 border-t border-slate-700/50 pt-2 text-xs text-slate-400">
+          <span>Status: <span className="text-slate-300">{session.summary.status}</span></span>
+          {session.summary.opened && <span>Opened: <span className="text-slate-300">{session.summary.opened}</span></span>}
+          {session.summary.closed && <span>Closed: <span className="text-slate-300">{session.summary.closed}</span></span>}
+          {pnl !== null && (
+            <span>P&L: <span className={pnl >= 0 ? "text-emerald-400" : "text-rose-400"}>₹{session.summary.pnl}</span></span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryView({ logContent }) {
+  const sessions = parseLogSessions(logContent);
+
+  if (sessions.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-slate-500">
+        <p>No strategy sessions found in this log.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {sessions.map((session, i) => (
+        <SessionCard key={i} session={session} index={i} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Page ──────────────────────────────────────────────────────────────
+
 export default function LogsViewerPage() {
   const navigate = useNavigate();
   const [logFiles, setLogFiles] = useState([]);
@@ -13,6 +338,7 @@ export default function LogsViewerPage() {
   const [lines, setLines] = useState(500);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [username, setUsername] = useState(() => getAuthUsername());
+  const [viewMode, setViewMode] = useState("summary"); // "summary" | "raw"
 
   // Check authentication on mount
   useEffect(() => {
@@ -193,6 +519,30 @@ export default function LogsViewerPage() {
               {/* Controls */}
               <div className="flex items-center justify-between mb-4 flex-wrap gap-4">
                 <div className="flex items-center gap-4">
+                  {/* View Mode Toggle */}
+                  <div className="inline-flex rounded-lg border border-slate-600 p-0.5">
+                    <button
+                      onClick={() => setViewMode("summary")}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                        viewMode === "summary"
+                          ? "bg-blue-600 text-white shadow"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Summary
+                    </button>
+                    <button
+                      onClick={() => setViewMode("raw")}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                        viewMode === "raw"
+                          ? "bg-blue-600 text-white shadow"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Raw
+                    </button>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <label className="text-sm text-gray-400">Lines:</label>
                     <select
@@ -267,9 +617,13 @@ export default function LogsViewerPage() {
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
                   </div>
                 ) : logContent ? (
-                  <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap">
-                    {logContent}
-                  </pre>
+                  viewMode === "summary" ? (
+                    <SummaryView logContent={logContent} />
+                  ) : (
+                    <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap">
+                      {logContent}
+                    </pre>
+                  )
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-500">
                     <div className="text-center">
