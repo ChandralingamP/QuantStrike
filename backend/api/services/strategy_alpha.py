@@ -1393,21 +1393,36 @@ class StrategyAlphaEngine:
         if level_date == market_day and current_high is not None and current_low is not None:
             return Decimal(current_high), Decimal(current_low)
 
-        prev_day = self._previous_trading_day(market_day)
         exchange = instrument.exchange or "NFO"
         token = contract.token
         if not token:
             raise StrategySkip("Contract token missing; refresh instrument metadata.")
 
-        start = self._market_time(prev_day, time(14, 45))
-        end = self._market_time(prev_day, time(15, 30))
-        candles = self.market_client.get_option_candles(
-            exchange=exchange,
-            symbol_token=token,
-            interval="FIVE_MINUTE",
-            start=start,
-            end=end,
-        )
+        # Try up to 5 previous weekdays to handle holidays
+        candidate = market_day
+        candles = []
+        for _ in range(5):
+            candidate = self._previous_trading_day(candidate)
+            start = self._market_time(candidate, time(14, 45))
+            end = self._market_time(candidate, time(15, 30))
+            candles = self.market_client.get_option_candles(
+                exchange=exchange,
+                symbol_token=token,
+                interval="FIVE_MINUTE",
+                start=start,
+                end=end,
+            )
+            if candles:
+                self.logger.info(
+                    "Previous session levels from %s (%d candles)",
+                    candidate.isoformat(), len(candles),
+                )
+                break
+            self.logger.info(
+                "No candle data for %s (likely holiday), trying earlier day",
+                candidate.isoformat(),
+            )
+
         if not candles:
             return None
 

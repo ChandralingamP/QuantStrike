@@ -94,6 +94,29 @@ function parseLogSessions(rawContent) {
       }
     }
 
+    // Previous session levels not available
+    if (msg.includes("Previous session levels not available")) {
+      if (current._currentContract) {
+        current._currentContract.result = "no_prev_levels";
+      }
+    }
+
+    // Entry condition not met
+    if (msg.includes("Entry condition not met") && !current._currentContract?.result) {
+      if (current._currentContract) {
+        current._currentContract.result = "no_entry";
+      }
+    }
+
+    // Track scan count
+    if (msg.match(/Scan #(\d+) result/)) {
+      const match = msg.match(/Scan #(\d+) result.*opened: (\d+)/);
+      if (match) {
+        current.summary.lastScan = parseInt(match[1]);
+        current.summary.lastScanOpened = parseInt(match[2]);
+      }
+    }
+
     // Trade opened
     if (msg.includes("Opened BUY") || msg.includes("Opened SELL")) {
       const match = msg.match(/Opened (\w+) position for (\w+) at ([\d.]+) \(target=([\d.]+), stop=([\d.]+)\)/);
@@ -264,14 +287,17 @@ function SessionCard({ session, index }) {
           <div className="flex flex-wrap gap-2">
             {session.instruments.map((inst, i) => {
               const hasBreakout = inst.contracts.some((c) => c.result === "breakout");
+              const noPrevLevels = inst.contracts.every((c) => c.result === "no_prev_levels");
               return (
                 <span key={i} className={`inline-flex items-center rounded-md px-2 py-1 text-xs ${
                   hasBreakout
                     ? "bg-emerald-500/20 text-emerald-300"
+                    : noPrevLevels
+                    ? "bg-amber-500/20 text-amber-300"
                     : "bg-slate-700/60 text-slate-400"
                 }`}>
                   {inst.name}
-                  {!hasBreakout && " — no breakout"}
+                  {noPrevLevels ? " — no prev levels (holiday?)" : !hasBreakout ? " — no breakout" : ""}
                 </span>
               );
             })}
@@ -390,7 +416,7 @@ export default function LogsViewerPage() {
       }
 
       const response = await fetch(
-        `${API_BASE_URL}/logs/content/?filename=${filename}&lines=${lines}&tail=true&username=${username}`,
+        `${API_BASE_URL}/logs/content/?filename=${filename}&lines=${lines}&tail=true&username=${username}${viewMode === "summary" ? "&since_session=true" : ""}`,
         {
           credentials: "include",
         },
@@ -432,6 +458,13 @@ export default function LogsViewerPage() {
       return () => clearInterval(interval);
     }
   }, [autoRefresh, selectedFile]);
+
+  // Re-fetch when view mode changes
+  useEffect(() => {
+    if (selectedFile) {
+      fetchLogContent(selectedFile.filename);
+    }
+  }, [viewMode]);
 
   const handleFileSelect = (filename) => {
     fetchLogContent(filename);

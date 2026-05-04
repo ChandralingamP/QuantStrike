@@ -118,10 +118,14 @@ class LogFileContentView(APIView):
             # Get query parameters
             lines = min(int(request.query_params.get('lines', 500)), 5000)
             tail = request.query_params.get('tail', 'true').lower() == 'true'
+            since_session = request.query_params.get('since_session', 'false').lower() == 'true'
             
             # Read file
             with open(filepath, 'r') as f:
-                if tail:
+                if since_session:
+                    # Return from last session marker to end (for summary view)
+                    content_lines = self._from_last_session(f, max_lines=10000)
+                elif tail:
                     # Get last N lines
                     content_lines = self._tail_file(f, lines)
                 else:
@@ -151,3 +155,22 @@ class LogFileContentView(APIView):
         # For small n, just read all and return last n
         lines = f.readlines()
         return lines[-n:] if len(lines) > n else lines
+
+    def _from_last_session(self, f, max_lines=10000):
+        """Return lines from the last session marker to end of file."""
+        SESSION_MARKERS = [
+            "STRATEGY ALPHA EXECUTION",
+            "TRADE MONITOR SERVICE STARTED",
+        ]
+        all_lines = f.readlines()
+        last_marker_idx = -1
+        for i in range(len(all_lines) - 1, -1, -1):
+            if any(marker in all_lines[i] for marker in SESSION_MARKERS):
+                last_marker_idx = i
+                break
+        if last_marker_idx >= 0:
+            # Include 2 lines before marker (usually separator lines)
+            start = max(0, last_marker_idx - 2)
+            return all_lines[start:start + max_lines]
+        # No marker found — fall back to tail
+        return all_lines[-max_lines:] if len(all_lines) > max_lines else all_lines
