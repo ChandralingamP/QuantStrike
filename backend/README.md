@@ -1,28 +1,27 @@
 # QuantStrike Backend
 
-Django REST API powering the QuantStrike trading strategy dashboard. The API exposes CRUD endpoints to manage strategies stored in PostgreSQL.
+Django REST API and strategy execution engine for the QuantStrike automated trading platform. Manages user accounts, instruments, trade execution, and scheduled jobs.
 
 ## Prerequisites
 
 - Python 3.12+
-- PostgreSQL 14+
+- PostgreSQL 15+
 
 ## Setup
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### Environment Variables
 
-Create a `.env` file based on `.env.example`:
+Create a `.env` file:
 
-```
-DJANGO_SECRET_KEY=replace-me
+```env
+DJANGO_SECRET_KEY=replace-this-with-a-secure-value
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 POSTGRES_DB=quantstrike
@@ -30,44 +29,89 @@ POSTGRES_USER=quantstrike
 POSTGRES_PASSWORD=quantstrike
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOWED_ORIGIN_REGEXES=http://localhost:5173
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=quantstrike.algo@gmail.com
+EMAIL_HOST_PASSWORD=<app-password>
+EMAIL_USE_TLS=true
+DEFAULT_FROM_EMAIL=quantstrike.algo@gmail.com
 ```
 
-### Database Preparation
+### Database
 
 ```bash
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-### Run the Development Server
-
+Or restore from a backup:
 ```bash
-python manage.py runserver 0.0.0.0:8000
+psql -U quantstrike -h localhost -d quantstrike < ../quantstrike_backup.sql
 ```
 
-The API root will be available at `http://localhost:8000/api/`.
-
-## Instrument Metadata Refresh
-
-Trading instruments (NIFTY, BANKNIFTY, SENSEX) rely on the Angel One scrip
-master that lives in `My API/instruments.json` and the derived expiry summary
-`My API/instruments_expiries.json`. Refresh both files and roll forward any
-expired contracts with:
+### Run the Server
 
 ```bash
+python manage.py runserver 8000
+```
+
+The API is at `http://localhost:8000/api/`. The **built-in scheduler** starts automatically with all trading jobs — no crontab needed.
+
+## Built-in Scheduler
+
+Defined in `api/scheduler.py`, starts on server boot via `api/apps.py`:
+
+| Time (IST) | Command | Purpose |
+|------------|---------|------ |
+| 7:00 AM | `update_instruments --skip-refresh` | Clear stale daily caches |
+| 9:16 AM | `run_all_strategies --strategy strategy_alpha` | Run strategy for all users |
+| 4:00 PM | `update_scrip_master --force` | Download contract list from Angel One |
+| 4:15 PM | `update_instruments` | Roll expired contracts |
+| 4:20 PM | `load_instrument_metadata` | Sync instrument metadata from JSON |
+| Midnight | `cleanup_old_logs --days 5` | Delete old log files |
+
+The scheduler only runs with `runserver`, not with management commands like `migrate` or `shell`.
+
+## Key Management Commands
+
+```bash
+# Download scrip master from Angel One
+python manage.py update_scrip_master --force
+
+# Update instruments (sync expiries, roll contracts)
 python manage.py update_instruments
+
+# Load instrument metadata
+python manage.py load_instrument_metadata --path data/instruments.json
+
+# Run strategy for a specific user
+python manage.py run_strategy_alpha chandralingam
+
+# Run strategy for all active users
+python manage.py run_all_strategies --strategy strategy_alpha
 ```
 
-This command invokes the helper in `My API/Data.py`, persists the JSON files,
-and updates the database so each instrument always points to the next valid
-expiry. To automate the refresh at 07:00 AM IST, add a cron entry similar to:
+## Project Layout
 
 ```
-0 1 * * * /path/to/venv/bin/python /path/to/backend/manage.py update_instruments >> /var/log/quantstrike_instruments.log 2>&1
+backend/
+├── api/
+│   ├── models.py              # User, Instrument, Trade, Strategy models
+│   ├── views.py               # REST API endpoints
+│   ├── scheduler.py           # APScheduler job definitions
+│   ├── services/
+│   │   ├── strategy_alpha.py  # Core breakout strategy engine
+│   │   ├── smartapi_market.py # Angel One SmartAPI client
+│   │   └── market_data.py     # Market data provider
+│   ├── management/commands/   # CLI commands (run_strategy_alpha, monitor_trades, etc.)
+│   └── migrations/
+├── data/                      # instruments.json, instruments_expiries.json
+├── logs/                      # Execution logs
+│   └── users/                 # Per-user strategy logs
+└── quantstrike_backend/       # Django settings
 ```
-
-(`0 1 * * *` runs at 01:00 UTC which is 07:00 IST.)
 
 ## Testing
 
