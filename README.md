@@ -69,14 +69,14 @@ Open **http://localhost:5173** — the Vite dev server proxies `/api` requests t
 
 ## Scheduled Jobs
 
-| Time (IST) | Job | Purpose |
-|------------|-----|------ |
-| 7:00 AM | `update_instruments --skip-refresh` | Clear stale daily caches |
-| 9:16 AM | `run_all_strategies` | Execute Strategy Alpha for all users |
-| 4:00 PM | `update_scrip_master --force` | Refresh contract list from Angel One |
-| 4:15 PM | `update_instruments` | Roll expired contracts |
-| 4:20 PM | `load_instrument_metadata` | Sync instrument config from JSON |
-| Midnight | `cleanup_old_logs --days 5` | Delete old log files |
+| Time (IST) | Job                                 | Purpose                              |
+| ---------- | ----------------------------------- | ------------------------------------ |
+| 7:00 AM    | `update_instruments --skip-refresh` | Clear stale daily caches             |
+| 9:16 AM    | `run_all_strategies`                | Execute Strategy Alpha for all users |
+| 4:00 PM    | `update_scrip_master --force`       | Refresh contract list from Angel One |
+| 4:15 PM    | `update_instruments`                | Roll expired contracts               |
+| 4:20 PM    | `load_instrument_metadata`          | Sync instrument config from JSON     |
+| Midnight   | `cleanup_old_logs --days 5`         | Delete old log files                 |
 
 ## Testing
 

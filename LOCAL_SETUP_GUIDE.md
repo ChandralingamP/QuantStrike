@@ -8,14 +8,15 @@ Step-by-step instructions to run the full QuantStrike platform on a new machine.
 
 Install these before starting:
 
-| Software       | Version | Install Command / Link                          |
-|----------------|---------|------------------------------------------------|
-| Python         | 3.12+   | `brew install python@3.12` or [python.org](https://www.python.org/downloads/) |
-| Node.js        | 18+     | `brew install node` or [nodejs.org](https://nodejs.org/) |
-| PostgreSQL     | 15+     | `brew install postgresql@17` or [Postgres.app](https://postgresapp.com/) |
-| Git            | any     | `brew install git` or [git-scm.com](https://git-scm.com/) |
+| Software   | Version | Install Command / Link                                                        |
+| ---------- | ------- | ----------------------------------------------------------------------------- |
+| Python     | 3.12+   | `brew install python@3.12` or [python.org](https://www.python.org/downloads/) |
+| Node.js    | 18+     | `brew install node` or [nodejs.org](https://nodejs.org/)                      |
+| PostgreSQL | 15+     | `brew install postgresql@17` or [Postgres.app](https://postgresapp.com/)      |
+| Git        | any     | `brew install git` or [git-scm.com](https://git-scm.com/)                     |
 
 > **Mac users**: Install [Homebrew](https://brew.sh/) first if you don't have it:
+>
 > ```bash
 > /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 > ```
@@ -34,6 +35,7 @@ cd QuantStrike
 ## Step 2: Setup PostgreSQL Database
 
 Make sure PostgreSQL is running:
+
 ```bash
 # If installed via Homebrew:
 brew services start postgresql@17
@@ -43,11 +45,13 @@ brew services start postgresql@17
 ```
 
 Create the database and user:
+
 ```bash
 psql -U postgres -h localhost
 ```
 
 In the PostgreSQL prompt, run:
+
 ```sql
 CREATE USER quantstrike WITH PASSWORD 'quantstrike';
 CREATE DATABASE quantstrike OWNER quantstrike;
@@ -56,6 +60,7 @@ GRANT ALL PRIVILEGES ON DATABASE quantstrike TO quantstrike;
 ```
 
 (Optional) Create a `.pgpass` file for passwordless access:
+
 ```bash
 echo "localhost:5432:*:quantstrike:quantstrike" > ~/.pgpass
 chmod 600 ~/.pgpass
@@ -105,6 +110,7 @@ DEFAULT_FROM_EMAIL=quantstrike.algo@gmail.com
 ### Initialize the Database
 
 **Option A — Fresh start (no existing data):**
+
 ```bash
 source venv/bin/activate
 python manage.py migrate
@@ -115,6 +121,7 @@ python manage.py createsuperuser
 **Option B — Restore from backup (recommended if you have one):**
 
 Copy `quantstrike_backup.sql` to the project root, then:
+
 ```bash
 psql -U quantstrike -h localhost -d quantstrike < ../quantstrike_backup.sql
 ```
@@ -122,20 +129,24 @@ psql -U quantstrike -h localhost -d quantstrike < ../quantstrike_backup.sql
 ### Copy Data Files (if available)
 
 If you have the data/logs backup (`qs_data_logs.tar.gz`), extract it:
+
 ```bash
 cd backend
 tar xzf ../qs_data_logs.tar.gz
 ```
 
 This restores:
+
 - `data/instruments.json` — Angel One scrip master
 - `data/instruments_expiries.json` — Expiry dates
 - `logs/users/` — Historical strategy execution logs
 
 If you DON'T have the backup, create the directories:
+
 ```bash
 mkdir -p data logs/users
 ```
+
 The scrip master will be downloaded automatically by the scheduled job (or manually — see Step 6).
 
 ### Verify Backend Works
@@ -170,6 +181,7 @@ That's it. The `vite.config.js` already has a proxy configured to forward `/api`
 You need **two terminals** running simultaneously:
 
 **Terminal 1 — Backend:**
+
 ```bash
 cd backend
 source venv/bin/activate
@@ -177,6 +189,7 @@ python manage.py runserver 8000
 ```
 
 When the server starts, you'll see:
+
 ```
 Scheduler started with 6 jobs: Clear stale daily caches (7:00 AM IST),
 Run Strategy Alpha (9:16 AM IST), Refresh scrip master (4:00 PM IST), ...
@@ -185,6 +198,7 @@ Run Strategy Alpha (9:16 AM IST), Refresh scrip master (4:00 PM IST), ...
 All scheduled tasks run automatically — **no crontab setup needed**.
 
 **Terminal 2 — Frontend:**
+
 ```bash
 cd frontend
 npm run dev
@@ -194,10 +208,10 @@ Open your browser and go to: **http://localhost:5173**
 
 ### Default Login Credentials
 
-| User           | Password          | Role        |
-|----------------|-------------------|-------------|
-| Admin          | QuantStrike@2026  | Superuser   |
-| chandralingam  | (check with admin)| Regular user|
+| User          | Password           | Role         |
+| ------------- | ------------------ | ------------ |
+| Admin         | QuantStrike@2026   | Superuser    |
+| chandralingam | (check with admin) | Regular user |
 
 > If you did a fresh setup (Option A), use the superuser credentials you created.
 
@@ -211,14 +225,14 @@ All trading jobs run automatically via the **built-in scheduler** when the backe
 
 ### Schedule
 
-| Time (IST) | Job | Purpose |
-|------------|-----|---------|
-| 7:00 AM    | update_instruments --skip-refresh | Clears stale daily caches before market opens |
-| 9:16 AM    | run_all_strategies | Runs Strategy Alpha for all users, spawns entry scanner & monitor |
-| 4:00 PM    | update_scrip_master --force | Downloads latest contract list from Angel One |
-| 4:15 PM    | update_instruments | Rolls expired contracts to next expiry |
-| 4:20 PM    | load_instrument_metadata | Syncs instrument config from JSON to DB |
-| Midnight   | cleanup_old_logs --days 5 | Deletes log files older than 5 days |
+| Time (IST) | Job                               | Purpose                                                           |
+| ---------- | --------------------------------- | ----------------------------------------------------------------- |
+| 7:00 AM    | update_instruments --skip-refresh | Clears stale daily caches before market opens                     |
+| 9:16 AM    | run_all_strategies                | Runs Strategy Alpha for all users, spawns entry scanner & monitor |
+| 4:00 PM    | update_scrip_master --force       | Downloads latest contract list from Angel One                     |
+| 4:15 PM    | update_instruments                | Rolls expired contracts to next expiry                            |
+| 4:20 PM    | load_instrument_metadata          | Syncs instrument config from JSON to DB                           |
+| Midnight   | cleanup_old_logs --days 5         | Deletes log files older than 5 days                               |
 
 The scheduler is defined in `backend/api/scheduler.py` and starts automatically with `runserver`. It does NOT start for management commands (`migrate`, `shell`, etc.).
 
@@ -257,32 +271,39 @@ python manage.py runserver 8000
 ## Troubleshooting
 
 ### "Connection refused" on frontend
+
 - Make sure the backend is running on port 8000 in a separate terminal.
 
 ### "Database does not exist"
+
 ```bash
 psql -U postgres -h localhost -c "CREATE DATABASE quantstrike OWNER quantstrike;"
 cd backend && source venv/bin/activate && python manage.py migrate
 ```
 
 ### "No module named 'xxx'"
+
 ```bash
 cd backend && source venv/bin/activate && pip install -r requirements.txt
 ```
 
 ### "SmartAPI IP address error" (at startup)
+
 ```
 Exception while retriving IP Address, using local host IP address
 ```
+
 This is a harmless warning from the Angel One SDK. It doesn't affect functionality.
 
 ### Cron jobs not running
+
 - Verify cron is set: `crontab -l`
 - Check Mac System Settings → Privacy & Security → Full Disk Access → add `/usr/sbin/cron`
 - Make sure laptop is not sleeping during scheduled times
 - Check logs: `cat backend/logs/strategies.log`
 
 ### Strategy shows "Previous session levels not available"
+
 - This means the previous trading day had no candle data (likely a market holiday).
 - The system retries up to 5 previous days automatically. If it still fails, the scrip master may be outdated — run `python manage.py update_scrip_master --force`.
 
@@ -318,11 +339,11 @@ QuantStrike/
 
 ## Files NOT in Git (must be copied manually)
 
-| File/Folder | Purpose | Required? |
-|-------------|---------|-----------|
-| `backend/.env` | Database credentials, email config, secrets | **Yes** |
-| `backend/venv/` | Python virtual environment | No — recreate with `python3 -m venv venv` |
-| `backend/data/instruments.json` | Angel One scrip master | No — downloaded by `update_scrip_master` |
-| `backend/logs/` | Strategy execution logs | No — created automatically |
-| `quantstrike_backup.sql` | Database dump with all users/trades | Only if restoring existing data |
-| `frontend/node_modules/` | Node packages | No — recreate with `npm install` |
+| File/Folder                     | Purpose                                     | Required?                                 |
+| ------------------------------- | ------------------------------------------- | ----------------------------------------- |
+| `backend/.env`                  | Database credentials, email config, secrets | **Yes**                                   |
+| `backend/venv/`                 | Python virtual environment                  | No — recreate with `python3 -m venv venv` |
+| `backend/data/instruments.json` | Angel One scrip master                      | No — downloaded by `update_scrip_master`  |
+| `backend/logs/`                 | Strategy execution logs                     | No — created automatically                |
+| `quantstrike_backup.sql`        | Database dump with all users/trades         | Only if restoring existing data           |
+| `frontend/node_modules/`        | Node packages                               | No — recreate with `npm install`          |

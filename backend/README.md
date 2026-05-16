@@ -47,6 +47,7 @@ python manage.py createsuperuser
 ```
 
 Or restore from a backup:
+
 ```bash
 psql -U quantstrike -h localhost -d quantstrike < ../quantstrike_backup.sql
 ```
@@ -63,14 +64,14 @@ The API is at `http://localhost:8000/api/`. The **built-in scheduler** starts au
 
 Defined in `api/scheduler.py`, starts on server boot via `api/apps.py`:
 
-| Time (IST) | Command | Purpose |
-|------------|---------|------ |
-| 7:00 AM | `update_instruments --skip-refresh` | Clear stale daily caches |
-| 9:16 AM | `run_all_strategies --strategy strategy_alpha` | Run strategy for all users |
-| 4:00 PM | `update_scrip_master --force` | Download contract list from Angel One |
-| 4:15 PM | `update_instruments` | Roll expired contracts |
-| 4:20 PM | `load_instrument_metadata` | Sync instrument metadata from JSON |
-| Midnight | `cleanup_old_logs --days 5` | Delete old log files |
+| Time (IST) | Command                                        | Purpose                               |
+| ---------- | ---------------------------------------------- | ------------------------------------- |
+| 7:00 AM    | `update_instruments --skip-refresh`            | Clear stale daily caches              |
+| 9:16 AM    | `run_all_strategies --strategy strategy_alpha` | Run strategy for all users            |
+| 4:00 PM    | `update_scrip_master --force`                  | Download contract list from Angel One |
+| 4:15 PM    | `update_instruments`                           | Roll expired contracts                |
+| 4:20 PM    | `load_instrument_metadata`                     | Sync instrument metadata from JSON    |
+| Midnight   | `cleanup_old_logs --days 5`                    | Delete old log files                  |
 
 The scheduler only runs with `runserver`, not with management commands like `migrate` or `shell`.
 

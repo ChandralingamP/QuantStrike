@@ -5,27 +5,39 @@
 !/backend/
 !/frontend/
 !/PRD/
-!.github/
 
-# Keep this gitignore file tracked
+# Keep these root files tracked
 !.gitignore
-
-# Allow deployment and documentation files
-!*.sh
-!*.md
+!README.md
+!LOCAL_SETUP_GUIDE.md
 
 # Backend ignores
-backend/data/instruments.json
-backend/data/instruments_expiries.json
 backend/venv/
 backend/staticfiles/
 backend/.env
 backend/db.sqlite3
+backend/logs/**
+!backend/logs/.gitkeep
+!backend/logs/users/
+!backend/logs/users/.gitkeep
+backend/data/instruments.json
+backend/data/instruments_expiries.json
+backend/__pycache__/
+backend/api/__pycache__/
+backend/api/**/__pycache__/
 
 # Frontend ignores
 frontend/node_modules/
 frontend/dist/
 frontend/assets/
+
+# Backups and data dumps
+*.sql
+*.tar.gz
+
+# Docker (no longer used)
+Dockerfile
+docker-compose.yml
 
 # IDEs
 .vscode/
