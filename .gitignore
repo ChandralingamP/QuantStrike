@@ -10,6 +10,7 @@
 !.gitignore
 !README.md
 !LOCAL_SETUP_GUIDE.md
+!.github/
 
 # Backend ignores
 backend/venv/
