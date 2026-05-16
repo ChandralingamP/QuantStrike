@@ -160,3 +160,27 @@ HISTORICAL_DATA_ROOT = os.getenv(
 QUANTSTRIKE_BROKERAGE_PER_LEG = _decimal_env("QUANTSTRIKE_BROKERAGE_PER_LEG", "20")
 QUANTSTRIKE_BROKERAGE_GST_RATE = _decimal_env("QUANTSTRIKE_BROKERAGE_GST_RATE", "0.18")
 QUANTSTRIKE_MARGIN_BUFFER_MULTIPLIER = _decimal_env("QUANTSTRIKE_MARGIN_BUFFER_MULTIPLIER", "1")
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "loggers": {
+        "scheduler": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+    },
+}
