@@ -1165,3 +1165,59 @@ class AdminUserManagementView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class SchedulerJobsView(APIView):
+    """Admin-only: list all scheduled jobs and their status."""
+    authentication_classes = []
+    permission_classes = []
+
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        serializer = AdminAccessSerializer(
+            data={"admin_username": request.query_params.get("admin_username")}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        from .scheduler import get_all_jobs_info
+        return Response(get_all_jobs_info())
+
+
+class SchedulerJobTriggerView(APIView):
+    """Admin-only: trigger a scheduled job to run immediately."""
+    authentication_classes = []
+    permission_classes = []
+
+    @csrf_exempt
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        admin_serializer = AdminAccessSerializer(
+            data={"admin_username": request.data.get("admin_username")}
+        )
+        admin_serializer.is_valid(raise_exception=True)
+
+        job_key = request.data.get("job_key")
+        if not job_key:
+            return Response(
+                {"detail": "job_key is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .scheduler import JOB_REGISTRY, trigger_job
+        if job_key not in JOB_REGISTRY:
+            return Response(
+                {"detail": f"Unknown job: {job_key}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        run_info = trigger_job(job_key)
+        return Response({
+            "detail": f"Job '{JOB_REGISTRY[job_key]['label']}' triggered.",
+            "job_key": job_key,
+            "run": run_info,
+        })

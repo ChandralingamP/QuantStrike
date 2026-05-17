@@ -4,6 +4,223 @@ import { useNavigate } from "react-router-dom";
 import { getAuthUsername, getUserIsStaff } from "../utils/authCookies.js";
 import { API_BASE_URL } from "../utils/constants.js";
 
+// ── Scheduled Jobs Panel ────────────────────────────────────
+
+function ScheduledJobsPanel({ adminUsername }) {
+  const [jobs, setJobs] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [triggeringJob, setTriggeringJob] = useState("");
+  const [triggerResult, setTriggerResult] = useState(null);
+
+  const loadJobs = useCallback(() => {
+    if (!adminUsername) return;
+    setIsLoading(true);
+    setError("");
+    axios
+      .get(`${API_BASE_URL}/scheduler/jobs/`, {
+        params: { admin_username: adminUsername },
+        withCredentials: false,
+      })
+      .then((res) => setJobs(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setError("Unable to load scheduled jobs."))
+      .finally(() => setIsLoading(false));
+  }, [adminUsername]);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  // Auto-refresh while a job is running
+  useEffect(() => {
+    const hasRunning = jobs.some(
+      (j) => j.last_run && j.last_run.status === "running"
+    );
+    if (!hasRunning) return undefined;
+    const id = setInterval(loadJobs, 3000);
+    return () => clearInterval(id);
+  }, [jobs, loadJobs]);
+
+  const triggerJob = useCallback(
+    (jobKey) => {
+      if (!adminUsername) return;
+      setTriggeringJob(jobKey);
+      setTriggerResult(null);
+      axios
+        .post(
+          `${API_BASE_URL}/scheduler/trigger/`,
+          { admin_username: adminUsername, job_key: jobKey },
+          { withCredentials: false }
+        )
+        .then((res) => {
+          setTriggerResult({
+            type: "success",
+            message: res.data?.detail || "Job triggered.",
+          });
+          // Refresh after short delay so status shows "running"
+          setTimeout(loadJobs, 500);
+        })
+        .catch((err) => {
+          setTriggerResult({
+            type: "error",
+            message:
+              err.response?.data?.detail || "Failed to trigger job.",
+          });
+        })
+        .finally(() => setTriggeringJob(""));
+    },
+    [adminUsername, loadJobs]
+  );
+
+  const formatTime = (iso) => {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        day: "2-digit",
+        month: "short",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const statusBadge = (run) => {
+    if (!run) return null;
+    const classes = {
+      running: "bg-amber-500/20 text-amber-300",
+      completed: "bg-emerald-500/20 text-emerald-300",
+      failed: "bg-rose-500/20 text-rose-300",
+    };
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+          classes[run.status] || "bg-slate-700 text-slate-300"
+        }`}
+      >
+        {run.status === "running" && (
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+        )}
+        {run.status}
+      </span>
+    );
+  };
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Scheduled Jobs</h2>
+          <p className="text-sm text-slate-400">
+            Trigger any scheduled job on-demand or view its status.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={loadJobs}
+          disabled={isLoading}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+        >
+          {isLoading ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+
+      {triggerResult && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            triggerResult.type === "success"
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+              : "border-rose-500/40 bg-rose-500/10 text-rose-200"
+          }`}
+        >
+          {triggerResult.message}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {isLoading && jobs.length === 0 ? (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-6 text-sm text-slate-300">
+          Loading jobs...
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {jobs.map((job) => {
+            const isRunning =
+              job.last_run?.status === "running" ||
+              triggeringJob === job.key;
+            return (
+              <div
+                key={job.key}
+                className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-950/70 p-4"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-white">
+                      {job.label}
+                    </h3>
+                    {job.last_run && statusBadge(job.last_run)}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {job.description}
+                  </p>
+                  <div className="mt-3 space-y-1 text-xs text-slate-500">
+                    <p>
+                      <span className="text-slate-400">Schedule:</span>{" "}
+                      {job.schedule}
+                    </p>
+                    {job.next_run && (
+                      <p>
+                        <span className="text-slate-400">Next run:</span>{" "}
+                        {formatTime(job.next_run)}
+                      </p>
+                    )}
+                    {job.last_run?.started_at && (
+                      <p>
+                        <span className="text-slate-400">Last triggered:</span>{" "}
+                        {formatTime(job.last_run.started_at)}
+                      </p>
+                    )}
+                    {job.last_run?.error && (
+                      <p className="text-rose-400">
+                        Error: {job.last_run.error}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isRunning}
+                  onClick={() => triggerJob(job.key)}
+                  className="mt-4 w-full rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700"
+                >
+                  {isRunning ? (
+                    <span className="flex items-center justify-center gap-1.5">
+                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
+                      Running...
+                    </span>
+                  ) : (
+                    "Run Now"
+                  )}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Admin Page ──────────────────────────────────────────────
+
 export default function AdminPage() {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -172,7 +389,11 @@ export default function AdminPage() {
         </div>
       ) : null}
 
-      {isLoading ? (
+      <ScheduledJobsPanel adminUsername={adminUsername} />
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-white">User Management</h2>
+        {isLoading ? (
         <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-6 text-sm text-slate-300">
           Loading users...
         </div>
@@ -272,6 +493,7 @@ export default function AdminPage() {
           </table>
         </div>
       )}
+      </div>
 
       {pendingDelete ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">

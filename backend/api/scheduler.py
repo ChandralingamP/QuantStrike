@@ -5,20 +5,64 @@ Runs all scheduled tasks (strategy execution, scrip master refresh, etc.)
 inside the Django process using APScheduler. No external crontab needed.
 
 Started automatically when the Django server boots (see apps.py).
+Also exposes helpers for on-demand job triggering via the admin API.
 """
 
 import logging
 import subprocess
 import sys
+import threading
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger("scheduler")
 
 _scheduler: BackgroundScheduler | None = None
+
+# Track on-demand job runs: {job_key: {status, started_at, finished_at, error}}
+_job_runs: dict[str, dict] = {}
+_job_runs_lock = threading.Lock()
+
+
+# ── Job registry (maps job keys to metadata) ────────────────
+
+JOB_REGISTRY = {
+    "clear_daily_caches": {
+        "label": "Clear Daily Caches",
+        "description": "Clears stale daily option selections before market opens",
+        "schedule": "7:00 AM IST (Mon-Fri)",
+    },
+    "run_strategies": {
+        "label": "Run Strategy Alpha",
+        "description": "Executes Strategy Alpha for all active users",
+        "schedule": "9:16 AM IST (Mon-Fri)",
+    },
+    "refresh_scrip_master": {
+        "label": "Refresh Scrip Master",
+        "description": "Downloads latest contract list from Angel One",
+        "schedule": "4:00 PM IST (Mon-Fri)",
+    },
+    "roll_expiries": {
+        "label": "Roll Expiries",
+        "description": "Rolls expired contracts and syncs metadata",
+        "schedule": "4:15 PM IST (Mon-Fri)",
+    },
+    "load_metadata": {
+        "label": "Load Instrument Metadata",
+        "description": "Syncs instrument config from JSON to database",
+        "schedule": "4:20 PM IST (Mon-Fri)",
+    },
+    "cleanup_logs": {
+        "label": "Cleanup Old Logs",
+        "description": "Deletes log files older than 5 days",
+        "schedule": "Midnight IST (Daily)",
+    },
+}
 
 
 def _run_management_command(*args: str) -> None:
@@ -167,3 +211,91 @@ def stop():
         _scheduler.shutdown(wait=False)
         _scheduler = None
         logger.info("Scheduler stopped")
+
+
+# ── On-demand job execution ─────────────────────────────────
+
+# Map job keys to their callable functions
+_JOB_FUNCTIONS = {
+    "clear_daily_caches": job_clear_daily_caches,
+    "run_strategies": job_run_strategies,
+    "refresh_scrip_master": job_refresh_scrip_master,
+    "roll_expiries": job_roll_expiries,
+    "load_metadata": job_load_metadata,
+    "cleanup_logs": job_cleanup_logs,
+}
+
+
+def trigger_job(job_key: str) -> dict:
+    """Trigger a job to run immediately in a background thread.
+
+    Returns the run status dict.
+    """
+    if job_key not in _JOB_FUNCTIONS:
+        raise ValueError(f"Unknown job key: {job_key}")
+
+    with _job_runs_lock:
+        current = _job_runs.get(job_key)
+        if current and current.get("status") == "running":
+            return current
+
+    run_info = {
+        "status": "running",
+        "started_at": timezone.now().isoformat(),
+        "finished_at": None,
+        "error": None,
+    }
+    with _job_runs_lock:
+        _job_runs[job_key] = run_info
+
+    def _execute():
+        try:
+            _JOB_FUNCTIONS[job_key]()
+            with _job_runs_lock:
+                _job_runs[job_key]["status"] = "completed"
+                _job_runs[job_key]["finished_at"] = timezone.now().isoformat()
+        except Exception as exc:
+            logger.exception("On-demand job %s failed", job_key)
+            with _job_runs_lock:
+                _job_runs[job_key]["status"] = "failed"
+                _job_runs[job_key]["finished_at"] = timezone.now().isoformat()
+                _job_runs[job_key]["error"] = str(exc)
+
+    thread = threading.Thread(target=_execute, name=f"job-{job_key}", daemon=True)
+    thread.start()
+    return run_info
+
+
+def get_job_status(job_key: str) -> dict | None:
+    """Get the latest run status of a job."""
+    with _job_runs_lock:
+        return _job_runs.get(job_key)
+
+
+def get_all_jobs_info() -> list[dict]:
+    """Return info about all registered jobs including next run time and last run status."""
+    jobs = []
+    for key, meta in JOB_REGISTRY.items():
+        info = {
+            "key": key,
+            "label": meta["label"],
+            "description": meta["description"],
+            "schedule": meta["schedule"],
+            "next_run": None,
+            "last_run": None,
+        }
+        # Get next scheduled run from APScheduler
+        if _scheduler:
+            try:
+                sched_job = _scheduler.get_job(key)
+                if sched_job and sched_job.next_run_time:
+                    info["next_run"] = sched_job.next_run_time.isoformat()
+            except Exception:
+                pass
+        # Get last on-demand run status
+        with _job_runs_lock:
+            run = _job_runs.get(key)
+            if run:
+                info["last_run"] = dict(run)
+        jobs.append(info)
+    return jobs

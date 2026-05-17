@@ -16,6 +16,8 @@ from .views import (
     PasswordResetVerifyView,
     PasswordResetView,
     RequestOTPView,
+    SchedulerJobsView,
+    SchedulerJobTriggerView,
     SignupView,
     StrategyViewSet,
     StrategyAlphaRunView,
@@ -74,5 +76,7 @@ urlpatterns = [
     ),
     path("logs/files/", LogFilesListView.as_view(), name="log-files-list"),
     path("logs/content/", LogFileContentView.as_view(), name="log-file-content"),
+    path("scheduler/jobs/", SchedulerJobsView.as_view(), name="scheduler-jobs"),
+    path("scheduler/trigger/", SchedulerJobTriggerView.as_view(), name="scheduler-trigger"),
     path("", include(router.urls)),
 ]
