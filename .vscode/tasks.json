@@ -3,7 +3,7 @@
   "tasks": [
     {
       "label": "Backend",
-      "type": "shell",
+      "type": "process",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -12,18 +12,21 @@
         "panel": "dedicated"
       },
       "windows": {
-        "command": "cd backend && .\\venv\\Scripts\\activate && python manage.py runserver 0.0.0.0:8000"
+        "command": "cmd",
+        "args": ["/c", "cd backend & .\\venv\\Scripts\\activate & python manage.py runserver 0.0.0.0:8000"]
       },
       "osx": {
-        "command": "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"
+        "command": "/bin/zsh",
+        "args": ["-c", "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"]
       },
       "linux": {
-        "command": "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"
+        "command": "/bin/bash",
+        "args": ["-c", "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"]
       }
     },
     {
       "label": "Frontend",
-      "type": "shell",
+      "type": "process",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -31,11 +34,22 @@
         "reveal": "always",
         "panel": "dedicated"
       },
-      "command": "cd frontend && npm run dev -- --host 0.0.0.0"
+      "windows": {
+        "command": "cmd",
+        "args": ["/c", "cd frontend & npm run dev -- --host 0.0.0.0"]
+      },
+      "osx": {
+        "command": "/bin/zsh",
+        "args": ["-c", "cd frontend && npm run dev -- --host 0.0.0.0"]
+      },
+      "linux": {
+        "command": "/bin/bash",
+        "args": ["-c", "cd frontend && npm run dev -- --host 0.0.0.0"]
+      }
     },
     {
       "label": "Tunnel",
-      "type": "shell",
+      "type": "process",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -43,7 +57,8 @@
         "reveal": "always",
         "panel": "dedicated"
       },
-      "command": "cloudflared tunnel --url http://localhost:5173"
+      "command": "cloudflared",
+      "args": ["tunnel", "--url", "http://localhost:5173"]
     },
     {
       "label": "Start QuantStrike Server",
