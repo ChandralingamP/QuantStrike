@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
-    allowedHosts: true,
+    allowedHosts: process.env.TUNNEL_HOST
+      ? [process.env.TUNNEL_HOST, ".trycloudflare.com"]
+      : true,
     proxy: {
       "/api": {
         target: "http://localhost:8000",

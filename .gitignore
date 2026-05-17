@@ -11,6 +11,8 @@
 !README.md
 !LOCAL_SETUP_GUIDE.md
 !.github/
+!start-server.ps1
+!start-server.bat
 
 # Backend ignores
 backend/venv/
