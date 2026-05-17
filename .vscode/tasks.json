@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend",
+      "type": "shell",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "quantstrike",
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "windows": {
+        "command": "cd backend && .\\venv\\Scripts\\activate && python manage.py runserver 0.0.0.0:8000"
+      },
+      "osx": {
+        "command": "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"
+      },
+      "linux": {
+        "command": "cd backend && source venv/bin/activate && python manage.py runserver 0.0.0.0:8000"
+      }
+    },
+    {
+      "label": "Frontend",
+      "type": "shell",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "quantstrike",
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "command": "cd frontend && npm run dev -- --host 0.0.0.0"
+    },
+    {
+      "label": "Tunnel",
+      "type": "shell",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "quantstrike",
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "command": "cloudflared tunnel --url http://localhost:5173"
+    },
+    {
+      "label": "Start QuantStrike Server",
+      "dependsOn": ["Backend", "Frontend", "Tunnel"],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "default"
+      }
+    }
+  ]
+}

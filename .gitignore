@@ -11,6 +11,7 @@
 !README.md
 !LOCAL_SETUP_GUIDE.md
 !.github/
+!.vscode/
 !start-server.ps1
 !start-server.bat
 
@@ -43,7 +44,8 @@ Dockerfile
 docker-compose.yml
 
 # IDEs
-.vscode/
+.vscode/*
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
